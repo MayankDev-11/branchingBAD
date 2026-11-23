@@ -1,0 +1,287 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 1. DEFAULT — OBSIDIAN SLATE (Clinical Carbon: highest legibility, refined Linear/medical-instrument feel) */
+:root,
+:root[data-theme="slate-pro"] {
+  --bg: #090e14;
+  --s1: #0f1620;
+  --s2: #16202d;
+  --trunk: #14b8a6;
+  --branch-open: #2dd4bf;
+  --branch-concluded: rgba(20, 184, 166, 0.45);
+  --branch-inconclusive: #64748b;
+  --sub-emerald: #10b981;
+  --sub-cyan: #38bdf8;
+  --change: #fb7185;
+  --hyp: #a78bfa;
+  --ok: #10b981;
+  --amb: #f59e0b;
+  --evi: #38bdf8;
+  --t1: #f1f5f9;
+  --t2: #cbd5e1;
+  --t3: #78889b;
+  --border: rgba(148, 163, 184, 0.14);
+  --border-strong: rgba(45, 212, 191, 0.34);
+  --trunk-glow: rgba(20, 184, 166, 0.38);
+  --ambient-glow: rgba(20, 184, 166, 0.07);
+  --grid-dot: rgba(148, 163, 184, 0.22);
+  --overlay: rgba(4, 7, 12, 0.72);
+  --btn-ink: #041012;
+}
+
+/* 2. ABYSSAL TEAL (Bioluminescent Deep Ocean) */
+:root[data-theme="teal"] {
+  --bg: #030c0e;
+  --s1: #07161a;
+  --s2: #0c2127;
+  --trunk: #14b8a6;
+  --branch-open: #2dd4bf;
+  --branch-concluded: rgba(20, 184, 166, 0.42);
+  --branch-inconclusive: #52807c;
+  --sub-emerald: #10b981;
+  --sub-cyan: #38bdf8;
+  --change: #ff4d6d;
+  --hyp: #a78bfa;
+  --ok: #10b981;
+  --amb: #f59e0b;
+  --evi: #38bdf8;
+  --t1: #e6fffa;
+  --t2: #99d5cf;
+  --t3: #52807c;
+  --border: rgba(45, 212, 191, 0.16);
+  --border-strong: rgba(45, 212, 191, 0.36);
+  --trunk-glow: rgba(20, 184, 166, 0.48);
+  --ambient-glow: rgba(20, 184, 166, 0.09);
+  --grid-dot: rgba(45, 212, 191, 0.20);
+  --overlay: rgba(2, 8, 10, 0.74);
+  --btn-ink: #030c0e;
+}
+
+/* 3. WARM NEUROLOGICAL (Architecture Review Mahogany & Synaptic Amber) */
+:root[data-theme="warm-neuro"] {
+  --bg: #100802;
+  --s1: #1a0e05;
+  --s2: #261608;
+  --trunk: #e8821e;
+  --branch-open: #f5a85c;
+  --branch-concluded: rgba(232, 130, 30, 0.42);
+  --branch-inconclusive: #8a6a4a;
+  --sub-emerald: #10b981;
+  --sub-cyan: #60a5fa;
+  --change: #ff5c5c;
+  --hyp: #a78bfa;
+  --ok: #22c55e;
+  --amb: #f59e0b;
+  --evi: #60a5fa;
+  --t1: #ffe8c8;
+  --t2: #d6b289;
+  --t3: #8c6b4a;
+  --border: rgba(232, 130, 30, 0.16);
+  --border-strong: rgba(245, 168, 92, 0.38);
+  --trunk-glow: rgba(232, 130, 30, 0.42);
+  --ambient-glow: rgba(232, 130, 30, 0.09);
+  --grid-dot: rgba(232, 130, 30, 0.22);
+  --overlay: rgba(10, 5, 1, 0.74);
+  --btn-ink: #120800;
+}
+
+/* 4. PRECISION IVORY (Swiss Scientific Instrument — Daylight High Contrast) */
+:root[data-theme="lab-ivory"] {
+  --bg: #f6f5f0;
+  --s1: #ffffff;
+  --s2: #eceae2;
+  --trunk: #0f766e;
+  --branch-open: #1d4ed8;
+  --branch-concluded: rgba(15, 118, 110, 0.45);
+  --branch-inconclusive: #64748b;
+  --sub-emerald: #15803d;
+  --sub-cyan: #0369a1;
+  --change: #c2410c;
+  --hyp: #6d28d9;
+  --ok: #15803d;
+  --amb: #b45309;
+  --evi: #1d4ed8;
+  --t1: #151922;
+  --t2: #374151;
+  --t3: #6b7280;
+  --border: rgba(21, 25, 34, 0.11);
+  --border-strong: rgba(29, 78, 216, 0.28);
+  --trunk-glow: rgba(15, 118, 110, 0.18);
+  --ambient-glow: rgba(29, 78, 216, 0.05);
+  --grid-dot: rgba(21, 25, 34, 0.16);
+  --overlay: rgba(21, 25, 34, 0.42);
+  --btn-ink: #ffffff;
+}
+
+/* 5. EDITORIAL CREAM (Pitch Deck Navy & Orange Theme) */
+:root[data-theme="ppt-light"] {
+  --bg: #f8f2e4;
+  --s1: #fffdf8;
+  --s2: #f1eadb;
+  --trunk: #1b1f6b;
+  --branch-open: #fd9b36;
+  --branch-concluded: rgba(27, 31, 107, 0.42);
+  --branch-inconclusive: #6b6459;
+  --sub-emerald: #15803d;
+  --sub-cyan: #1d4ed8;
+  --change: #dc2626;
+  --hyp: #4f46e5;
+  --ok: #15803d;
+  --amb: #d97706;
+  --evi: #1b1f6b;
+  --t1: #1e1b18;
+  --t2: #4a443c;
+  --t3: #6b6459;
+  --border: rgba(27, 31, 107, 0.14);
+  --border-strong: rgba(27, 31, 107, 0.30);
+  --trunk-glow: rgba(27, 31, 107, 0.16);
+  --ambient-glow: rgba(253, 155, 54, 0.08);
+  --grid-dot: rgba(27, 31, 107, 0.16);
+  --overlay: rgba(27, 31, 107, 0.42);
+  --btn-ink: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--t1);
+  transition: background-color 220ms ease, color 220ms ease;
+}
+
+/* GPU-accelerated silky pan & zoom on React Flow viewport */
+.react-flow__viewport {
+  will-change: transform;
+  transform-origin: 0 0;
+}
+.react-flow__edges,
+.react-flow__nodes {
+  will-change: transform;
+}
+.react-flow__attribution {
+  display: none !important;
+}
+
+@keyframes pulseRing {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.78;
+  }
+  70% {
+    transform: scale(1.85);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.85);
+    opacity: 0;
+  }
+}
+
+.change-pulse-ring {
+  animation: pulseRing 2.4s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+
+@keyframes sapFlow {
+  0% {
+    stroke-dashoffset: 180;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.sap-flow-trunk {
+  animation: sapFlow 4.2s linear infinite;
+}
+
+.sap-flow-branch {
+  animation: sapFlow 2.8s linear infinite;
+}
+
+@keyframes meltKnot {
+  0%, 100% {
+    box-shadow: 0 0 10px var(--trunk-glow);
+  }
+  50% {
+    box-shadow: 0 0 22px var(--trunk-glow);
+  }
+}
+
+.melt-knot-glow {
+  animation: meltKnot 3.2s ease-in-out infinite;
+}
+
+@keyframes audioBarWave {
+  0%, 100% {
+    transform: scaleY(0.28);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.eq-bar {
+  transform-origin: bottom;
+  animation: audioBarWave 0.9s ease-in-out infinite;
+}
+
+@keyframes voiceSpotlight {
+  0%, 100% {
+    box-shadow: 0 0 0 2px var(--branch-open), 0 0 24px var(--trunk-glow);
+  }
+  50% {
+    box-shadow: 0 0 0 5px var(--branch-open), 0 0 38px var(--trunk-glow);
+  }
+}
+
+.voice-spotlight {
+  animation: voiceSpotlight 1.5s ease-in-out infinite;
+  border-radius: 16px;
+}
+
+@keyframes nodeSproutIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.76) translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.node-sprout {
+  animation: nodeSproutIn 420ms cubic-bezier(0.2, 0.85, 0.25, 1) forwards;
+}
+
+@keyframes edgeGrowDraw {
+  0% {
+    stroke-dashoffset: 600;
+    opacity: 0.2;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+.edge-grow {
+  stroke-dasharray: 600;
+  animation: edgeGrowDraw 620ms cubic-bezier(0.22, 0.85, 0.28, 1) forwards;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}

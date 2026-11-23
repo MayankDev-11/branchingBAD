@@ -1,0 +1,116 @@
+{
+  "id": "br_1",
+  "title": "Why do I keep getting headaches?",
+  "status": "open",
+  "start_date": "2026-11-05",
+  "change_event": {
+    "id": "ce_1",
+    "label": "Sleep down 47 min on Nov 3",
+    "record_ids": [
+      "sl_0412"
+    ]
+  },
+  "hypotheses": [
+    {
+      "rank": 1,
+      "label": "Short sleep",
+      "confidence": 72,
+      "claims": [
+        {
+          "text": "4 of 5 headache days followed nights under 6 hours",
+          "record_ids": [
+            "sl_0412",
+            "hd_0031",
+            "sl_0398",
+            "hd_0028"
+          ]
+        },
+        {
+          "text": "Sleep averaged 5h 58m on headache days vs 7h 12m baseline",
+          "record_ids": [
+            "sl_0412",
+            "sl_0413",
+            "sl_0414"
+          ]
+        }
+      ],
+      "test": "Lights out by 11:30 PM for 10 days",
+      "test_days": 10
+    },
+    {
+      "rank": 2,
+      "label": "Low water intake",
+      "confidence": 41,
+      "claims": [
+        {
+          "text": "3 of 5 headache days had water below 1 L",
+          "record_ids": [
+            "wt_0210",
+            "hd_0031"
+          ]
+        }
+      ],
+      "test": "Drink 2 litres every day for 10 days",
+      "test_days": 10
+    },
+    {
+      "rank": 3,
+      "label": "Screen light before bed",
+      "confidence": 28,
+      "claims": [],
+      "test": "No screens after 10 PM for 7 days",
+      "test_days": 7
+    }
+  ],
+  "experiment": {
+    "id": "exp_1",
+    "hypothesis_rank": 1,
+    "description": "Lights out by 11:30 PM every night",
+    "start_date": "2026-11-10",
+    "duration_days": 10,
+    "days_elapsed": 8,
+    "adherence_pct": 80,
+    "success_criterion": "Sleep average must exceed 7 hours on at least 7 of 10 nights",
+    "locked": true,
+    "locked_at": "2026-11-10T09:00:00Z",
+    "status": "active"
+  },
+  "evidence": [
+    {
+      "id": "sl_0412",
+      "date": "2026-11-03",
+      "metric": "sleep_min",
+      "value": 315,
+      "label": "5h 15m sleep",
+      "device": "iPhone",
+      "source_id": "src_a1"
+    },
+    {
+      "id": "hd_0031",
+      "date": "2026-11-04",
+      "metric": "headache",
+      "value": 1,
+      "label": "Headache reported",
+      "device": "Manual entry",
+      "source_id": "src_b2"
+    },
+    {
+      "id": "sl_0413",
+      "date": "2026-11-04",
+      "metric": "sleep_min",
+      "value": 298,
+      "label": "4h 58m sleep",
+      "device": "iPhone",
+      "source_id": "src_a1"
+    },
+    {
+      "id": "wt_0210",
+      "date": "2026-11-03",
+      "metric": "water_ml",
+      "value": 820,
+      "label": "820 ml water",
+      "device": "Manual entry",
+      "source_id": "src_c3"
+    }
+  ]
+}

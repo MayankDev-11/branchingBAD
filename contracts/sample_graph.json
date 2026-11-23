@@ -1,0 +1,89 @@
+{
+  "range": {
+    "start": "2026-08-25",
+    "end": "2026-11-22"
+  },
+  "trunk": [
+    {
+      "date": "2026-08-25",
+      "sleep_min": 432,
+      "steps": 7840,
+      "water_ml": 2100,
+      "headache": false
+    },
+    {
+      "date": "2026-09-15",
+      "sleep_min": 418,
+      "steps": 6200,
+      "water_ml": 1800,
+      "headache": false
+    },
+    {
+      "date": "2026-10-12",
+      "sleep_min": 390,
+      "steps": 5100,
+      "water_ml": 1200,
+      "headache": false
+    },
+    {
+      "date": "2026-11-03",
+      "sleep_min": 362,
+      "steps": 6120,
+      "water_ml": 900,
+      "headache": true
+    },
+    {
+      "date": "2026-11-10",
+      "sleep_min": 355,
+      "steps": 5800,
+      "water_ml": 950,
+      "headache": true
+    },
+    {
+      "date": "2026-11-18",
+      "sleep_min": 360,
+      "steps": 6400,
+      "water_ml": 1000,
+      "headache": false
+    }
+  ],
+  "change_events": [
+    {
+      "id": "ce_1",
+      "metric": "sleep_min",
+      "date": "2026-11-03",
+      "delta": -47,
+      "label": "Sleep down 47 min",
+      "record_ids": [
+        "sl_0412",
+        "sl_0413"
+      ]
+    }
+  ],
+  "branches": [
+    {
+      "id": "br_0",
+      "title": "Does caffeine after 4 PM cut my sleep?",
+      "status": "concluded",
+      "start_date": "2026-10-01",
+      "end_date": "2026-10-22",
+      "lane": 2
+    },
+    {
+      "id": "br_1",
+      "title": "Why do I keep getting headaches?",
+      "status": "open",
+      "start_date": "2026-11-05",
+      "end_date": null,
+      "lane": 1
+    }
+  ],
+  "knowledge": [
+    {
+      "id": "kn_1",
+      "date": "2026-10-22",
+      "statement": "Caffeine after 4 PM cuts my sleep by about 30 min",
+      "confidence": "medium"
+    }
+  ]
+}

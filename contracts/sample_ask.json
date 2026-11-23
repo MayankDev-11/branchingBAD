@@ -1,0 +1,35 @@
+{
+  "red_flag": false,
+  "hypotheses": [
+    {
+      "rank": 1,
+      "text": "Short sleep",
+      "claims": [
+        {
+          "text": "4 of 5 headache days followed nights under 6 hours",
+          "record_ids": [
+            "sl_0412",
+            "hd_0031"
+          ]
+        }
+      ],
+      "test": "Lights out by 11:30 PM for 10 days"
+    },
+    {
+      "rank": 2,
+      "text": "Low water intake",
+      "claims": [
+        {
+          "text": "3 of 5 headache days had water below 1 L",
+          "record_ids": [
+            "wt_0210",
+            "hd_0031"
+          ]
+        }
+      ],
+      "test": "Drink 2 litres every day for 10 days"
+    }
+  ],
+  "dropped_claims": 1,
+  "sent_to_ai": "[PERSON_1] asked: why do I keep getting headaches? Sleep averaged 6h 02m over the last 30 days. On 4 of 5 headache days sleep was under 6 hours (records: sl_0412, sl_0398, sl_0414, sl_0399). Water intake was below 1 L on 3 of 5 headache days (records: wt_0210, wt_0205, wt_0198)."
+}

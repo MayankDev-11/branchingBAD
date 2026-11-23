@@ -1,0 +1,14 @@
+{
+  "id": "sl_0412",
+  "metric": "sleep_min",
+  "value": 315,
+  "unit": "minutes",
+  "display": "5 hours 15 minutes",
+  "date": "2026-11-03",
+  "time": "07:14:22",
+  "device": "iPhone 15 Pro",
+  "source_id": "src_a1",
+  "source_file": "apple_health_export.xml",
+  "data_quality": 0.75,
+  "normalization": "HKCategoryValueSleepAnalysisAsleep -> minutes"
+}
