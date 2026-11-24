@@ -13,15 +13,13 @@ def test_health():
 
 
 def test_graph():
+    # Full contract checks live in test_graph_contract.py.
     response = client.get("/api/graph")
     assert response.status_code == 200
 
     data = response.json()
 
-    assert len(data["observations"]) == 28
-    assert len(data["branches"]) == 1
-    assert len(data["evidence"]) == 1
-    assert len(data["experiments"]) == 1
+    assert set(data) == {"range", "trunk", "change_events", "branches", "knowledge"}
 
 
 def test_observations():

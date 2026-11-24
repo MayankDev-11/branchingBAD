@@ -1,11 +1,26 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
 from backend.generators.demo_data import generate_demo_data
+from backend.routes import graph
+
+FRONTEND_ORIGINS = ["http://localhost:5173"]
 
 app = FastAPI(
     title="RootTrace API",
     description="Backend for RootTrace health intelligence platform",
     version="0.1.0",
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=FRONTEND_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(graph.router)
 
 
 @app.get("/")
@@ -23,13 +38,6 @@ def health_check():
         "project": "RootTrace",
         "version": "0.1.0",
     }
-
-
-@app.get("/api/graph")
-def get_graph():
-    graph_data = generate_demo_data()
-    return graph_data.model_dump(mode="json")
-
 
 
 @app.get("/api/observations")
