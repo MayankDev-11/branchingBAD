@@ -16,8 +16,13 @@ export.xml
 export_cda.xml
 apple_health_export/
 
+# personal Obsidian notes (local only, never pushed)
+notes/
+.obsidian/
+
 # frontend
 node_modules/
+**/node_modules/
 dist/
 *.tsbuildinfo
 .vite/
