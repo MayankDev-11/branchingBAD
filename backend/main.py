@@ -1,11 +1,49 @@
-from fastapi import FastAPI, HTTPException
-from backend.generators.demo_data import generate_demo_data
+import os
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from backend.auth import auth_router, get_current_user, init_auth_db
+from backend.routes import branches, experiments, graph
+
+# Exact origins only: cookies are sent with allow_credentials, so never '*'.
+FRONTEND_ORIGINS = list(dict.fromkeys(
+    ["http://localhost:5173", "http://127.0.0.1:5173"]
+    + [o.strip() for o in os.getenv("FRONTEND_ORIGINS", "").split(",") if o.strip()]
+))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_auth_db()
+    yield
+
 
 app = FastAPI(
     title="RootTrace API",
     description="Backend for RootTrace health intelligence platform",
-    version="0.1.0",
+    version="0.3.0",
+    lifespan=lifespan,
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=FRONTEND_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Satwik's sign-in routes: /api/auth/register, /login, /logout, /me, /demo.
+app.include_router(auth_router)
+
+# Parikshit's routes (contracts/api.md 1-5) need a signed-in session cookie.
+# Mayank's /api/ask and /api/report/weekly plug in the same way.
+signed_in = [Depends(get_current_user)]
+app.include_router(graph.router, dependencies=signed_in)
+app.include_router(branches.router, dependencies=signed_in)
+app.include_router(experiments.router, dependencies=signed_in)
 
 
 @app.get("/")
@@ -21,136 +59,5 @@ def health_check():
     return {
         "status": "healthy",
         "project": "RootTrace",
-        "version": "0.1.0",
+        "version": "0.3.0",
     }
-
-
-@app.get("/api/graph")
-def get_graph():
-    graph_data = generate_demo_data()
-    return graph_data.model_dump(mode="json")
-
-
-
-@app.get("/api/observations")
-def get_observations():
-    graph_data = generate_demo_data()
-
-    return {
-        "count": len(graph_data.observations),
-        "observations": graph_data.observations,
-    }
-
-
-@app.get("/api/observations/{observation_id}")
-def get_observation(observation_id: str):
-    graph_data = generate_demo_data()
-
-    for observation in graph_data.observations:
-        if observation.id == observation_id:
-            return observation
-
-    raise HTTPException(
-        status_code=404,
-        detail=f"Observation '{observation_id}' not found",
-    )
-
-
-
-@app.get("/api/branches")
-def get_branches():
-    graph_data = generate_demo_data()
-
-    return {
-        "count": len(graph_data.branches),
-        "branches": graph_data.branches,
-    }
-
-
-@app.get("/api/branches/{branch_id}")
-def get_branch(branch_id: str):
-    graph_data = generate_demo_data()
-
-    for branch in graph_data.branches:
-        if branch.id == branch_id:
-            return branch
-
-    raise HTTPException(
-        status_code=404,
-        detail=f"Branch '{branch_id}' not found",
-    )
-
-
-
-@app.get("/api/experiments")
-def get_experiments():
-    graph_data = generate_demo_data()
-
-    return {
-        "count": len(graph_data.experiments),
-        "experiments": graph_data.experiments,
-    }
-
-
-@app.get("/api/experiments/{experiment_id}")
-def get_experiment(experiment_id: str):
-    graph_data = generate_demo_data()
-
-    for experiment in graph_data.experiments:
-        if experiment.id == experiment_id:
-            return experiment
-
-    raise HTTPException(
-        status_code=404,
-        detail=f"Experiment '{experiment_id}' not found",
-    )
-
-
-
-@app.get("/api/evidence")
-def get_evidence():
-    graph_data = generate_demo_data()
-
-    return {
-        "count": len(graph_data.evidence),
-        "evidence": graph_data.evidence,
-    }
-
-
-@app.get("/api/evidence/{evidence_id}/provenance")
-def get_evidence_provenance(evidence_id: str):
-    graph_data = generate_demo_data()
-
-    evidence = next(
-        (
-            item for item in graph_data.evidence
-            if item.id == evidence_id
-        ),
-        None,
-    )
-
-    if evidence is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Evidence '{evidence_id}' not found",
-        )
-
-    observation = next(
-        (
-            item for item in graph_data.observations
-            if item.id == evidence.observation_id
-        ),
-        None,
-    )
-
-    if observation is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Linked observation not found",
-        )
-
-    return {
-        "evidence": evidence,
-        "source_observation": observation,
-    }
-

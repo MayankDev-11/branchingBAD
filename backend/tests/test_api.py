@@ -1,9 +1,15 @@
-
 from fastapi.testclient import TestClient
 
 from backend.main import app
 
 client = TestClient(app)
+client.post("/api/auth/demo")  # the data routes need a signed-in session
+
+
+def test_root():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
 
 
 def test_health():
@@ -12,67 +18,25 @@ def test_health():
     assert response.json()["status"] == "healthy"
 
 
-def test_graph():
+def test_graph_top_level_keys():
+    # Full contract checks live in test_contracts.py.
     response = client.get("/api/graph")
     assert response.status_code == 200
-
-    data = response.json()
-
-    assert len(data["observations"]) == 28
-    assert len(data["branches"]) == 1
-    assert len(data["evidence"]) == 1
-    assert len(data["experiments"]) == 1
+    assert set(response.json()) == {"range", "trunk", "change_events", "branches", "knowledge"}
 
 
-def test_observations():
-    response = client.get("/api/observations")
-    assert response.status_code == 200
-    assert response.json()["count"] == 28
+def test_unknown_branch_and_record_are_404():
+    assert client.get("/api/branches/br_999").status_code == 404
+    assert client.get("/api/records/sl_9999").status_code == 404
+    assert client.post("/api/experiments/exp_999/lock").status_code == 404
 
 
-def test_single_observation():
-    response = client.get("/api/observations/obs_sleep_1")
-    assert response.status_code == 200
-    assert response.json()["metric"] == "sleep_duration"
+def test_records_after_the_clock_are_hidden():
+    # sl_0090 is 22 Nov; the demo clock starts on 20 Nov.
+    assert client.get("/api/records/sl_0088").status_code == 200
+    assert client.get("/api/records/sl_0090").status_code == 404
 
 
-def test_invalid_observation():
-    response = client.get("/api/observations/invalid_id")
-    assert response.status_code == 404
-
-
-def test_branches():
-    response = client.get("/api/branches")
-    assert response.status_code == 200
-    assert response.json()["count"] == 1
-
-
-def test_single_branch():
-    response = client.get("/api/branches/branch_001")
-    assert response.status_code == 200
-
-
-def test_experiments():
-    response = client.get("/api/experiments")
-    assert response.status_code == 200
-    assert response.json()["count"] == 1
-
-
-def test_evidence_provenance():
-    response = client.get(
-        "/api/evidence/evidence_001/provenance"
-    )
-
-    assert response.status_code == 200
-
-    data = response.json()
-    assert data["evidence"]["id"] == "evidence_001"
-    assert data["source_observation"]["id"] == "obs_sleep_14"
-
-
-def test_invalid_evidence():
-    response = client.get(
-        "/api/evidence/invalid_id/provenance"
-    )
-
-    assert response.status_code == 404
+def test_advance_rejects_bad_days():
+    assert client.post("/api/demo/advance", json={"days": 0}).status_code == 422
+    assert client.post("/api/demo/advance", json={}).status_code == 422

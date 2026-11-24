@@ -10,9 +10,19 @@ __pycache__/
 
 data/uploads/
 data/real_health_exports/
+# real Apple Health exports never go in the repo (rule 8)
+export.zip
+export.xml
+export_cda.xml
+apple_health_export/
+
+# personal Obsidian notes (local only, never pushed)
+notes/
+.obsidian/
 
 # frontend
 node_modules/
+**/node_modules/
 dist/
 *.tsbuildinfo
 .vite/

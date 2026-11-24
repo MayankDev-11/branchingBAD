@@ -1,5 +1,5 @@
-// Flip USE_MOCK to false once Parikshit's FastAPI backend is live at http://localhost:8000
-// Parikshit: make sure CORSMiddleware allows origin "http://localhost:5173"
+// Live data: requests go to /api, which Vite proxies to the FastAPI backend on http://localhost:8000.
+// Set USE_MOCK = true to run the UI on the sample JSON without a backend.
 import sampleGraph from './contracts/sample_graph.json';
 import sampleBranch from './contracts/sample_branch.json';
 import sampleRecord from './contracts/sample_record.json';
@@ -14,8 +14,8 @@ import type {
   RecordDetailResponse,
 } from './types';
 
-export const USE_MOCK = true;
-const API_BASE = 'http://localhost:8000';
+export const USE_MOCK = false;
+const API_BASE = ''; // Proxied via Vite /api -> http://localhost:8000 for same-origin HttpOnly cookies
 
 const RED_FLAG_KEYWORDS = [
   'chest pain',
@@ -172,7 +172,7 @@ export const api = {
       base.branches = [...base.branches, ...customBranches];
       return base;
     }
-    const res = await fetch(`${API_BASE}/api/graph`);
+    const res = await fetch(`${API_BASE}/api/graph`, { credentials: 'include' });
     if (!res.ok) throw new Error(`GET /api/graph failed (${res.status})`);
     return res.json();
   },
@@ -193,7 +193,7 @@ export const api = {
       }
       return b;
     }
-    const res = await fetch(`${API_BASE}/api/branches/${encodeURIComponent(id)}`);
+    const res = await fetch(`${API_BASE}/api/branches/${encodeURIComponent(id)}`, { credentials: 'include' });
     if (!res.ok) throw new Error(`Investigation "${id}" not found (${res.status})`);
     return res.json();
   },
@@ -288,6 +288,7 @@ export const api = {
 
     const res = await fetch(`${API_BASE}/api/branches`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     });
@@ -331,7 +332,7 @@ export const api = {
     if (USE_MOCK) {
       return MOCK_RECORDS[id] ?? { ...(sampleRecord as RecordDetailResponse), id };
     }
-    const res = await fetch(`${API_BASE}/api/records/${encodeURIComponent(id)}`);
+    const res = await fetch(`${API_BASE}/api/records/${encodeURIComponent(id)}`, { credentials: 'include' });
     if (!res.ok) throw new Error(`Record "${id}" not found (${res.status})`);
     return res.json();
   },
@@ -359,6 +360,7 @@ export const api = {
     }
     const res = await fetch(`${API_BASE}/api/ask`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ branch_id: branchId, question }),
     });
@@ -388,6 +390,7 @@ export const api = {
     }
     const res = await fetch(`${API_BASE}/api/experiments/${encodeURIComponent(experimentId)}/lock`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
@@ -400,11 +403,15 @@ export const api = {
       mockClockDaysAdvanced = days;
       return this.getGraph();
     }
-    const res = await fetch(`${API_BASE}/api/demo/advance`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ days }),
-    });
+    // days = 0 is the Reset button: rebuild the demo from seed 42 and the 20 Nov clock.
+    const res = days > 0
+      ? await fetch(`${API_BASE}/api/demo/advance`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ days }),
+        })
+      : await fetch(`${API_BASE}/api/demo/reset`, { method: 'POST', credentials: 'include' });
     if (!res.ok) throw new Error(`Demo advance failed (${res.status})`);
     return res.json();
   },
