@@ -27,7 +27,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from xml.etree.ElementTree import iterparse
+
+from defusedxml.ElementTree import iterparse  # refuses entity-expansion tricks in an untrusted file
 
 from backend.data.db import connect, init_schema
 from backend.data.metrics import METRICS

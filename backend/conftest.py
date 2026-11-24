@@ -8,7 +8,9 @@ import tempfile
 import pytest
 
 # Tests never touch the real demo database file.
-os.environ["ROOTTRACE_DB"] = os.path.join(tempfile.mkdtemp(prefix="roottrace-test-"), "test.db")
+_TMP = tempfile.mkdtemp(prefix="roottrace-test-")
+os.environ["ROOTTRACE_DB"] = os.path.join(_TMP, "test.db")
+os.environ["ROOTTRACE_AUTH_DB_PATH"] = os.path.join(_TMP, "auth.db")
 
 
 @pytest.fixture

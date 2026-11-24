@@ -620,7 +620,7 @@ export const PrivacyView: React.FC<{
 
   const handleDownloadObsidianNote = () => {
     const md = `---
-rootline_export: true
+roottrace_export: true
 exported_at: ${new Date().toISOString()}
 privacy_mode: presidio_plus_bedrock_mumbai
 ---

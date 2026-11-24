@@ -1,0 +1,118 @@
+/* Scoped strictly to Landing Page (/) and Auth Gateway (/auth).
+   Zero leakage into the existing dashboard workspace. */
+.rl-scope {
+  --rl-bg-canvas: #F7F6F2;
+  --rl-bg-surface: #FFFFFF;
+  --rl-bg-subtle: #EFECE6;
+  --rl-border-hairline: #E2DFD7;
+  --rl-ink-primary: #151817;
+  --rl-ink-secondary: #545955;
+  --rl-ink-muted: #7A807B;
+  --rl-accent-primary: #2A574B;
+  --rl-accent-primary-hover: #21463C;
+  --rl-accent-signal: #C77724;
+  --rl-status-error: #B83B3B;
+  --rl-status-ok: #2E6F56;
+
+  background-color: var(--rl-bg-canvas);
+  color: var(--rl-ink-primary);
+  font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.rl-scope .rl-serif {
+  font-family: 'Instrument Serif', Georgia, serif;
+}
+
+.rl-scope .rl-mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.rl-scope .rl-card {
+  background-color: var(--rl-bg-surface);
+  border: 1px solid var(--rl-border-hairline);
+  border-radius: 12px;
+}
+
+.rl-scope .rl-input {
+  background-color: var(--rl-bg-surface);
+  border: 1px solid var(--rl-border-hairline);
+  border-radius: 8px;
+  color: var(--rl-ink-primary);
+  transition: border-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.rl-scope .rl-input:hover {
+  border-color: #C8C4BA;
+}
+
+.rl-scope .rl-input:focus {
+  outline: none;
+  border-color: var(--rl-accent-primary);
+  box-shadow: 0 0 0 3px rgba(42, 87, 75, 0.14);
+}
+
+.rl-scope .rl-input[aria-invalid="true"] {
+  border-color: var(--rl-status-error);
+}
+
+.rl-scope .rl-btn-primary {
+  background-color: var(--rl-accent-primary);
+  color: #FFFFFF;
+  border-radius: 999px;
+  transition: background-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.rl-scope .rl-btn-primary:hover:not(:disabled) {
+  background-color: var(--rl-accent-primary-hover);
+}
+
+.rl-scope .rl-btn-primary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.rl-scope .rl-btn-ghost {
+  background-color: transparent;
+  color: var(--rl-ink-primary);
+  border: 1px solid var(--rl-border-hairline);
+  border-radius: 999px;
+  transition: background-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.rl-scope .rl-btn-ghost:hover:not(:disabled) {
+  background-color: var(--rl-bg-subtle);
+  border-color: #CCC8BE;
+}
+
+.rl-scope a:focus-visible,
+.rl-scope button:focus-visible,
+.rl-scope input:focus-visible,
+.rl-scope select:focus-visible {
+  outline: 2px solid var(--rl-accent-primary);
+  outline-offset: 2px;
+}
+
+.rl-scope .rl-dot-grid {
+  background-image: radial-gradient(rgba(21, 24, 23, 0.11) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.rl-scope .rl-transition {
+  transition: all 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rl-scope *,
+  .rl-scope *::before,
+  .rl-scope *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

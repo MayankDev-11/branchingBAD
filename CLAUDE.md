@@ -19,4 +19,4 @@ Apple Health importer done: `python -m backend.data.import_apple_health export.z
 ### Next tasks, in order
 
 1. Help Mayank wire his tools to the functions above; help Satwik flip `USE_MOCK` to false.
-2. When the login work (landing page, `/auth`, `backend/app/auth/`) is pushed: mount its `auth_router` in `backend/main.py` and drop its `protected_dashboard.py` (it serves the sample JSON on the same `/api/graph`, `/api/branches`, `/api/records` paths as the real routes). Tested locally on 24 Nov: works with the real backend through the Vite `/api` proxy.
+2. Done on branch `combined-ui` (24 Nov): Satwik's landing page, sign-in and UI merged with the backend, renamed ROOTLINE -> RootTrace. Sign-in code lives in `backend/auth/` (Satwik's); `backend/main.py` mounts it and the data routes need a session cookie. `USE_MOCK = false`; the frontend calls `/api/...`, which Vite proxies to :8000. His `protected_dashboard.py` (sample JSON on the real paths) was left out. `/api/ask` shows a 404 banner until Mayank's code is merged.

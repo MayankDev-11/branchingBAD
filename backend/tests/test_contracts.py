@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from backend.main import app
 
 client = TestClient(app)
+client.post("/api/auth/demo")  # the data routes need a signed-in session
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")

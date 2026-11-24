@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from backend.main import app
 
 client = TestClient(app)
+client.post("/api/auth/demo")  # the data routes need a signed-in session
 
 
 def test_root():

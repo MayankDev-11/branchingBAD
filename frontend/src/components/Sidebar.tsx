@@ -14,6 +14,8 @@ import {
   SlidersHorizontal,
   User,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../auth/AuthContext';
 import type { NavView } from '../types';
 
 interface SidebarProps {
@@ -35,6 +37,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onNavigate,
   onSearchChange,
 }) => {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const initials = (user?.full_name || 'Satwik')
+    .split(/\s+/)
+    .map((p) => p[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
+  const handleSignOut = async () => {
+    await logout();
+    navigate('/', { replace: true });
+  };
+
   const navItems: Array<{ id: NavView; label: string; icon: React.ReactNode; badge?: number }> = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutGrid className="w-4 h-4" /> },
     {
@@ -206,11 +223,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 border: '1px solid var(--border-strong)',
               }}
             >
-              ST
+              {initials}
             </div>
             {!collapsed && (
               <div className="text-left min-w-0">
-                <div className="text-[12px] font-semibold text-t1 truncate">Your profile</div>
+                <div className="text-[12px] font-semibold text-t1 truncate">
+                  {user?.full_name || 'Your profile'}
+                </div>
                 <div className="font-mono text-[9px] text-ok truncate">DATA SYNCED · NOW</div>
               </div>
             )}
@@ -218,12 +237,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {!collapsed && <ShieldCheck className="w-4 h-4 text-branchOpen shrink-0" />}
         </button>
 
-        {!collapsed && (
-          <div className="mt-2 px-2 py-1 flex items-center gap-2 text-[11.5px] text-t3">
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Demo Session</span>
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={handleSignOut}
+          className="mt-2 w-full px-2 py-1.5 rounded-lg flex items-center gap-2 text-[11.5px] text-t3 hover:text-t1 hover:bg-s2 transition-colors"
+        >
+          <LogOut className="w-3.5 h-3.5 shrink-0" />
+          {!collapsed && <span>Sign Out{user?.is_demo ? ' (Demo)' : ''}</span>}
+        </button>
       </div>
     </aside>
   );
