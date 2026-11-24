@@ -53,9 +53,6 @@ const NAV_ITEMS = [
   { href: '#local-first', label: 'Local-First' },
 ];
 
-const prefersReducedMotion = () =>
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
 const NAVBAR_HEIGHT = 64;
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 let cancelGlide: (() => void) | null = null;
@@ -93,7 +90,8 @@ const glideTo = (top: number) => {
 };
 
 // Nav links glide to their section instead of jumping, and the section heading lands just
-// below the sticky navbar. People who turned on "reduce motion" still get an instant jump.
+// below the sticky navbar. This always glides, even when the OS asks for reduced motion
+// (Windows does that whenever "Animation effects" is off), because the team wants the glide.
 const scrollToSection = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
   const target = document.querySelector<HTMLElement>(href);
   if (!target) return;
@@ -107,8 +105,7 @@ const scrollToSection = (event: React.MouseEvent<HTMLAnchorElement>, href: strin
     maxScroll,
     Math.max(0, target.getBoundingClientRect().top + window.scrollY - headerHeight),
   );
-  if (prefersReducedMotion()) window.scrollTo(0, top);
-  else glideTo(top);
+  glideTo(top);
 };
 
 // Fills the thin bar under the navbar as the page is scrolled (0% at the top, 100% at the bottom).
