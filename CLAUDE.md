@@ -14,7 +14,9 @@ Layout (kept in `backend/`, not `backend/app/`): `backend/data/` (schema.sql, ge
 
 Functions for Mayank's six AI tools: `queries.build_branch` (get_branch), `patterns.summarize_metric`, `patterns.compare_periods`, `patterns.find_patterns` (via `state.branch_patterns`), `baselines.get_baseline`, `queries.get_records`.
 
+Apple Health importer done: `python -m backend.data.import_apple_health export.zip --db backend/data/apple_health.db --detect` (writes its own git-ignored DB, never the demo one).
+
 ### Next tasks, in order
 
-1. Apple Health importer: stream-parse export.xml, skip the profile record, rename "Name's Apple Watch" to "Apple Watch", write source_records + observations (first to cut if short on time).
-2. Help Mayank wire his tools to the functions above; help Satwik flip `USE_MOCK` to false.
+1. Help Mayank wire his tools to the functions above; help Satwik flip `USE_MOCK` to false.
+2. When the login work (landing page, `/auth`, `backend/app/auth/`) is pushed: mount its `auth_router` in `backend/main.py` and drop its `protected_dashboard.py` (it serves the sample JSON on the same `/api/graph`, `/api/branches`, `/api/records` paths as the real routes). Tested locally on 24 Nov: works with the real backend through the Vite `/api` proxy.

@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS source_records (
     raw_value     TEXT NOT NULL,
     raw_unit      TEXT,
     recorded_at   TEXT NOT NULL,          -- ISO 8601 with +05:30
+    ended_at      TEXT,                   -- end of an interval record (a sleep segment); NULL otherwise
     imported_at   TEXT NOT NULL
 );
 
