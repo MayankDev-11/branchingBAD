@@ -274,8 +274,12 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
 
           <button
             type="button"
-            onClick={() => onOpenRecord('sl_0412', 'ai')}
-            className="px-2.5 py-1.5 rounded-lg font-mono text-[10px] font-semibold text-branchOpen shrink-0"
+            disabled={!askResult.hypotheses[0]?.claims[0]?.record_ids[0]}
+            onClick={() => {
+              const rid = askResult.hypotheses[0]?.claims[0]?.record_ids[0];
+              if (rid) onOpenRecord(rid, 'ai');
+            }}
+            className="px-2.5 py-1.5 rounded-lg font-mono text-[10px] font-semibold text-branchOpen shrink-0 disabled:opacity-40"
             style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border-strong)' }}
           >
             What AI saw
@@ -326,6 +330,12 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
 
   const exp = branch.experiment;
   const adherencePct = Math.min(100, Math.max(0, exp?.adherence_pct ?? 0));
+  const firstCitedId = branch.hypotheses[0]?.claims[0]?.record_ids[0] ?? branch.change_event?.record_ids[0];
+  const startedOn = new Date(`${branch.start_date}T00:00:00Z`).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
 
   const handleSpeakBranch = async () => {
     if (speakingSummary) {
@@ -334,7 +344,11 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
       return;
     }
     const top = branch.hypotheses[0];
-    const spoken = `Investigation: ${branch.title}. Top verified finding is ${top?.label ?? top?.text ?? 'short sleep'} at ${top?.confidence ?? 72} percent evidence support. ${top?.claims[0]?.text ?? ''}. Active locked experiment: ${exp?.description ?? 'none'}, currently at ${adherencePct} percent adherence.`;
+    const spoken = top
+      ? `Investigation: ${branch.title}. Top finding is ${top.label ?? top.text} at ${top.confidence ?? 0} percent confidence. ${
+          top.claims[0]?.text ?? 'Not enough data yet'
+        }. ${exp ? `Locked experiment: ${exp.description}, currently at ${adherencePct} percent adherence.` : 'No experiment locked yet.'}`
+      : `Investigation: ${branch.title}. Not enough data yet.`;
     setSpeakingSummary(true);
     try {
       const key = localStorage.getItem('elevenlabs_api_key') ?? undefined;
@@ -381,7 +395,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           </button>
           <div className="min-w-0">
             <div className="font-mono text-[9.5px] text-t3">
-              Investigation · {branch.status === 'open' ? 'Open · 12 days' : 'Concluded'}
+              Investigation · {branch.status === 'open' ? `Open since ${startedOn}` : 'Concluded'}
             </div>
             <h2 className="font-serif italic text-[17.5px] text-t1 leading-snug truncate">
               {branch.title}
@@ -414,11 +428,9 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           >
             <AlertTriangle className="w-4 h-4 text-change shrink-0 mt-0.5" />
             <div>
-              <div className="text-[11.5px] font-semibold text-change">
-                Triggered by change event · Nov 3
-              </div>
+              <div className="text-[11.5px] font-semibold text-change">Triggered by change event</div>
               <div className="text-[10.5px] text-t3 mt-0.5">
-                {branch.change_event.label} · sustained 11-day pattern
+                {branch.change_event.label} · detected by PELT
               </div>
             </div>
           </div>
@@ -446,8 +458,9 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => onOpenRecord('sl_0412', 'ai')}
-                className="font-mono text-[10px] font-semibold text-branchOpen hover:underline"
+                disabled={!firstCitedId}
+                onClick={() => firstCitedId && onOpenRecord(firstCitedId, 'ai')}
+                className="font-mono text-[10px] font-semibold text-branchOpen hover:underline disabled:opacity-40"
               >
                 What AI saw →
               </button>

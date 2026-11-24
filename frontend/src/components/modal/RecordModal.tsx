@@ -5,7 +5,8 @@ import type { AskResponse, RecordDetailResponse } from '../../types';
 
 interface RecordModalProps {
   record: RecordDetailResponse | null;
-  askContext: AskResponse;
+  // The last real /api/ask response, or null if nothing has been sent to the AI yet.
+  askContext: AskResponse | null;
   initialTab: 'raw' | 'ai';
   onClose: () => void;
 }
@@ -32,7 +33,10 @@ export const RecordModal: React.FC<RecordModalProps> = ({
 
   if (!record) return null;
 
-  const scrubbedParts = askContext.sent_to_ai.split('[PERSON_1]');
+  const sentToAi =
+    askContext?.sent_to_ai ??
+    'Nothing has been sent to the AI yet. Ask a question in the box at the top, and the exact scrubbed text that was sent will appear here.';
+  const scrubbedParts = sentToAi.split('[PERSON_1]');
 
   const content = (
     <div
@@ -178,7 +182,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                   {scrubbedParts.slice(1).join('[PERSON_1]')}
                 </>
               ) : (
-                askContext.sent_to_ai
+                sentToAi
               )}
             </div>
 
@@ -198,7 +202,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
 
             {/* Footer Verification Badges */}
             <div className="flex flex-wrap items-center gap-2.5 pt-1">
-              {askContext.dropped_claims > 0 && (
+              {askContext && askContext.dropped_claims > 0 && (
                 <span
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full font-mono text-[11px] font-semibold"
                   style={{
@@ -208,7 +212,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                   }}
                 >
                   <ShieldAlert className="w-3.5 h-3.5" />
-                  {askContext.dropped_claims} claim dropped after checking
+                  {askContext.dropped_claims} claim{askContext.dropped_claims === 1 ? '' : 's'} dropped after checking
                 </span>
               )}
               <span

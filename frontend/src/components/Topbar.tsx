@@ -7,6 +7,7 @@ interface TopbarProps {
   changeCount: number;
   openCount: number;
   totalRecords: number;
+  dayCount: number;
   isDataConnected: boolean;
   isAsking: boolean;
   onAskSubmit: (question: string) => void;
@@ -28,6 +29,7 @@ export const Topbar: React.FC<TopbarProps> = ({
   changeCount,
   openCount,
   totalRecords,
+  dayCount,
   isDataConnected,
   isAsking,
   onAskSubmit,
@@ -62,7 +64,7 @@ export const Topbar: React.FC<TopbarProps> = ({
       {/* Single-line status pills */}
       <div className="hidden lg:flex items-center gap-2">
         {[
-          `${totalRecords.toLocaleString()} observations · 90 days`,
+          `${totalRecords.toLocaleString()} observations · ${dayCount} days`,
           `${changeCount} change event${changeCount === 1 ? '' : 's'}`,
           `${openCount} active branch${openCount === 1 ? '' : 'es'}`,
         ].map((chip) => (

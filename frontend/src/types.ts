@@ -129,6 +129,109 @@ export interface RecordDetailResponse {
   normalization: string;
 }
 
+// GET /api/insights (contracts/sample_insights.json). Every number on the Insights,
+// Profile and Data & help pages comes from here, computed in Python (rule 9).
+export interface InsightsDay {
+  date: string;
+  sleep: number | null;
+  sleep_id: string | null;
+  water: number | null;
+  water_id: string | null;
+  screen: number | null;
+  screen_id: string | null;
+  headache: boolean | null;
+  headache_id: string | null;
+}
+
+export interface InsightsHypothesis {
+  branch_id: string;
+  branch_title: string;
+  rank: number;
+  label: string;
+  metric: string;
+  op: string;
+  threshold: number;
+  exposure_text: string;
+  confidence: number;
+  k: number | null;
+  n: number | null;
+  j: number | null;
+  m: number | null;
+  claim: string;
+  record_ids: string[];
+}
+
+export interface InsightsExperimentNight {
+  date: string;
+  value: number | null;
+  record_id: string | null;
+  met: boolean | null;
+}
+
+export interface InsightsResponse {
+  as_of: string;
+  sleep_shift: {
+    change_event_id: string;
+    date: string;
+    delta_min: number;
+    before_median_min: number;
+    after_median_min: number;
+    post_window_days: number;
+    normal_low_min: number | null;
+    normal_high_min: number | null;
+    normal_median_min: number | null;
+    baseline_days: number | null;
+    record_ids: string[];
+  } | null;
+  days: InsightsDay[];
+  screen: {
+    weeks: { week_start: string; avg_min: number; days: number }[];
+    before_avg_min: number | null;
+    after_avg_min: number | null;
+  };
+  hypotheses: InsightsHypothesis[];
+  experiment: {
+    id: string;
+    branch_id: string;
+    description: string;
+    success_criterion: string;
+    metric: string;
+    threshold: number;
+    min_days: number | null;
+    duration_days: number;
+    days_elapsed: number;
+    adherence_pct: number;
+    status: string;
+    nights: InsightsExperimentNight[];
+    nights_met: number;
+    nights_logged: number;
+  } | null;
+  knowledge_count: number;
+  coverage: {
+    total_observations: number;
+    excluded: number;
+    days: number;
+    metrics: { metric: string; title: string; count: number; coverage_pct: number }[];
+    sources: { source_file: string; device: string; count: number }[];
+    weekly: { week_start: string; apple_health: number; other: number }[];
+  };
+}
+
+// POST /api/import/apple-health
+export interface ImportSummary {
+  source_file: string;
+  records_read: number;
+  records_used: number;
+  records_skipped: number;
+  profile_skipped: boolean;
+  raw_inserted: number;
+  observations: Record<string, number>;
+  excluded: number;
+  already_present: number;
+  first_date: string | null;
+  last_date: string | null;
+}
+
 export interface AskResponse {
   red_flag: boolean;
   hypotheses: BranchHypothesis[];

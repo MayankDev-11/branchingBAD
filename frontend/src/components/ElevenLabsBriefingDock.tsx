@@ -10,43 +10,15 @@ export interface BriefingBeat {
   highlightNodes: string[];
 }
 
-const WEEKLY_BRIEFING_BEATS: BriefingBeat[] = [
-  {
-    id: 'beat-1',
-    label: '1 / 4 · Change Detected',
-    text: 'Your 30-day sleep normal held at 7 hours 10 minutes until November 3rd, when Python detected a 47-minute drop.',
-    recordIds: ['sl_0412', 'sl_0413'],
-    highlightNodes: ['ce-ce_1'],
-  },
-  {
-    id: 'beat-2',
-    label: '2 / 4 · Top Verified Cause',
-    text: 'Four of your five headache days followed nights under six hours of sleep, backed by records sl_0412 and hd_0031, with one unverified AI claim dropped.',
-    recordIds: ['sl_0412', 'hd_0031'],
-    highlightNodes: ['br1-hub', 'br1-sub-1', 'ev-dew-sl1'],
-  },
-  {
-    id: 'beat-3',
-    label: '3 / 4 · Locked Experiment',
-    text: 'Your locked 11:30 PM lights-out experiment is at 80 percent adherence after 8 nights, on track to beat your 7-hour sleep criterion.',
-    recordIds: ['sl_0413'],
-    highlightNodes: ['br1-exp-1'],
-  },
-  {
-    id: 'beat-4',
-    label: '4 / 4 · Verified Knowledge',
-    text: 'Your October caffeine investigation already melted into a verified knowledge conclusion: caffeine after 4 PM cuts sleep by about 30 minutes.',
-    recordIds: ['sl_0412'],
-    highlightNodes: ['br0-knowledge'],
-  },
-];
-
 interface ElevenLabsBriefingDockProps {
+  // Built by GraphCanvas from the API data, so every number spoken comes from Python.
+  beats: BriefingBeat[];
   onHighlightNodes: (nodeIds: string[]) => void;
   onOpenRecord: (recordId: string, tab?: 'raw' | 'ai') => void;
 }
 
 export const ElevenLabsBriefingDock: React.FC<ElevenLabsBriefingDockProps> = ({
+  beats,
   onHighlightNodes,
   onOpenRecord,
 }) => {
@@ -79,11 +51,11 @@ export const ElevenLabsBriefingDock: React.FC<ElevenLabsBriefingDockProps> = ({
   }, []);
 
   const playBeatAt = async (index: number) => {
-    if (index >= WEEKLY_BRIEFING_BEATS.length) {
+    if (index >= beats.length) {
       stopPlayback();
       return;
     }
-    const beat = WEEKLY_BRIEFING_BEATS[index];
+    const beat = beats[index];
     setBeatIdx(index);
     onHighlightNodes(beat.highlightNodes);
     playingRef.current = true;
@@ -126,11 +98,12 @@ export const ElevenLabsBriefingDock: React.FC<ElevenLabsBriefingDockProps> = ({
     if (isPlaying) {
       stopPlayback();
     } else {
-      playBeatAt(beatIdx >= WEEKLY_BRIEFING_BEATS.length ? 0 : beatIdx);
+      playBeatAt(beatIdx >= beats.length ? 0 : beatIdx);
     }
   };
 
-  const activeBeat = WEEKLY_BRIEFING_BEATS[beatIdx] ?? WEEKLY_BRIEFING_BEATS[0];
+  const activeBeat = beats[beatIdx] ?? beats[0];
+  if (!activeBeat) return null; // nothing to brief on until the data has loaded
 
   if (!expanded) {
     return (
@@ -209,7 +182,7 @@ export const ElevenLabsBriefingDock: React.FC<ElevenLabsBriefingDockProps> = ({
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
-            onClick={() => playBeatAt((beatIdx + 1) % WEEKLY_BRIEFING_BEATS.length)}
+            onClick={() => playBeatAt((beatIdx + 1) % beats.length)}
             title="Next insight beat"
             className="w-7 h-7 rounded-lg flex items-center justify-center text-t2 hover:text-t1"
             style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border)' }}

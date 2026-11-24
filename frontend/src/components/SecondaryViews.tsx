@@ -20,7 +20,9 @@ import {
   Trash2,
   Watch,
 } from 'lucide-react';
-import type { ThemeMode } from '../types';
+import { api } from '../api';
+import { useAuth } from '../auth/AuthContext';
+import type { ImportSummary, InsightsResponse, ThemeMode } from '../types';
 
 export const THEME_OPTIONS: Array<{
   id: ThemeMode;
@@ -69,13 +71,32 @@ export const THEME_OPTIONS: Array<{
 // =========================================================
 // 1. PROFILE VIEW (CONNECTED ACCOUNTS + 5-THEME GALLERY)
 // =========================================================
+// Records per source file, from GET /api/insights (Python), for the account cards.
+const sourceCount = (insights: InsightsResponse | null, ...files: string[]) =>
+  (insights?.coverage.sources ?? [])
+    .filter((s) => files.includes(s.source_file))
+    .reduce((sum, s) => sum + s.count, 0);
+
 export const ProfileView: React.FC<{
   theme: ThemeMode;
   totalRecords: number;
+  insights: InsightsResponse | null;
   isDataConnected: boolean;
   onThemeChange: (t: ThemeMode) => void;
   onGoConnect: () => void;
-}> = ({ theme, totalRecords, isDataConnected, onThemeChange, onGoConnect }) => (
+}> = ({ theme, totalRecords, insights, isDataConnected, onThemeChange, onGoConnect }) => {
+  const { user } = useAuth();
+  const name = user?.full_name || 'RootTrace User';
+  const initials = name
+    .split(/\s+/)
+    .map((p) => p[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+  const appleCount = sourceCount(insights, 'apple_health_export.xml', 'screen_time_export.csv');
+  const manualCount = sourceCount(insights, 'manual_checkins.sqlite');
+
+  return (
   <div className="h-full overflow-y-auto p-7 max-w-5xl mx-auto space-y-6">
     <div
       className="rounded-2xl p-6 flex flex-wrap items-center justify-between gap-4"
@@ -90,12 +111,14 @@ export const ProfileView: React.FC<{
             border: '1.5px solid var(--branch-open)',
           }}
         >
-          ST
+          {initials}
         </div>
         <div>
-          <h1 className="font-serif text-[25px] text-t1">Satwik · Personal Workspace</h1>
+          <h1 className="font-serif text-[25px] text-t1">
+            {/workspace$/i.test(name) ? name : `${name} · Personal Workspace`}
+          </h1>
           <p className="font-mono text-[11px] text-t3">
-            {totalRecords} observations indexed · Privacy Gate: Presidio + Bedrock Guardrail (ap-south-1 Mumbai)
+            {totalRecords.toLocaleString()} observations indexed · Privacy Gate: Presidio + Bedrock Guardrail (ap-south-1 Mumbai)
           </p>
         </div>
       </div>
@@ -138,8 +161,8 @@ export const ProfileView: React.FC<{
           {
             icon: <Smartphone className="w-5 h-5 text-branchOpen" />,
             name: 'Apple Health Export',
-            status: isDataConnected ? `Connected · ${Math.max(0, totalRecords - 102)} records` : 'Disconnected',
-            detail: 'apple_health_export.xml · iPhone 15 Pro (owner name scrubbed)',
+            status: isDataConnected ? `Connected · ${appleCount.toLocaleString()} records` : 'Disconnected',
+            detail: 'apple_health_export.xml + Screen Time · iPhone 15 Pro (owner name scrubbed)',
             connected: isDataConnected,
           },
           {
@@ -152,7 +175,7 @@ export const ProfileView: React.FC<{
           {
             icon: <CheckCircle2 className="w-5 h-5 text-ok" />,
             name: 'Manual & ElevenLabs Voice',
-            status: isDataConnected ? 'Active · 102 logs' : 'Paused',
+            status: isDataConnected ? `Active · ${manualCount.toLocaleString()} logs` : 'Paused',
             detail: 'Headache, hydration, mood & voice branch check-ins',
             connected: isDataConnected,
           },
@@ -232,64 +255,66 @@ export const ProfileView: React.FC<{
       </div>
     </div>
   </div>
-);
+  );
+};
 
 // =========================================================
 // 2. DATA & HELP VIEW (UPLOAD COVERAGE GRAPHS + IMPORTERS + GUIDES)
 // =========================================================
-const BASE_WEEKLY_UPLOADS = [
-  { week: 'W1', apple: 54, manual: 7 },
-  { week: 'W2', apple: 58, manual: 8 },
-  { week: 'W3', apple: 62, manual: 6 },
-  { week: 'W4', apple: 60, manual: 9 },
-  { week: 'W5', apple: 64, manual: 8 },
-  { week: 'W6', apple: 61, manual: 9 },
-  { week: 'W7', apple: 59, manual: 10 },
-  { week: 'W8', apple: 63, manual: 7 },
-  { week: 'W9', apple: 65, manual: 8 },
-  { week: 'W10', apple: 68, manual: 11 },
-  { week: 'W11', apple: 64, manual: 10 },
-  { week: 'W12', apple: 67, manual: 9 },
+const METRIC_COLORS = [
+  'var(--branch-open)',
+  'var(--sub-cyan)',
+  'var(--hyp)',
+  'var(--sub-emerald)',
+  'var(--amb)',
+  'var(--change)',
+  'var(--evi)',
+  'var(--ok)',
 ];
 
 export const ConnectDataView: React.FC<{
   totalRecords: number;
+  insights: InsightsResponse | null;
   isDataConnected: boolean;
-  onDataUploaded: (addedRecords: number, fileName: string) => void;
   onReloadDemo: () => void;
-}> = ({ totalRecords, isDataConnected, onDataUploaded, onReloadDemo }) => {
-  const [uploadState, setUploadState] = useState<'idle' | 'processing' | 'done'>('idle');
+}> = ({ totalRecords, insights, isDataConnected, onReloadDemo }) => {
+  const [uploadState, setUploadState] = useState<'idle' | 'processing' | 'done' | 'error'>('idle');
   const [lastFile, setLastFile] = useState('');
-  const [extraBatch, setExtraBatch] = useState(0);
+  const [importResult, setImportResult] = useState<ImportSummary | null>(null);
+  const [uploadError, setUploadError] = useState('');
   const [googleNotice, setGoogleNotice] = useState(false);
 
-  const handleFile = (file?: File) => {
-    const name = file?.name || 'apple_health_export.xml';
-    setLastFile(name);
+  // Runs the real Apple Health importer on the server (POST /api/import/apple-health).
+  // It writes to its own database, so the demo graph and its numbers stay as they are.
+  const handleFile = async (file?: File) => {
+    if (!file) return;
+    setLastFile(file.name);
     setUploadState('processing');
-    setTimeout(() => {
-      const added = 148;
-      setExtraBatch((e) => e + added);
-      onDataUploaded(added, name);
+    setImportResult(null);
+    setUploadError('');
+    try {
+      setImportResult(await api.importAppleHealth(file));
       setUploadState('done');
-    }, 750);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Upload failed');
+      setUploadState('error');
+    }
   };
 
-  const weeklyBars = isDataConnected
-    ? BASE_WEEKLY_UPLOADS.map((w, idx) =>
-        idx === BASE_WEEKLY_UPLOADS.length - 1 ? { ...w, apple: w.apple + extraBatch } : w
-      )
-    : BASE_WEEKLY_UPLOADS.map((w) => ({ ...w, apple: 0, manual: 0 }));
+  const coverage = insights?.coverage;
+  const weeklyBars = (coverage?.weekly ?? []).map((w, idx) => ({
+    week: `W${idx + 1}`,
+    apple: isDataConnected ? w.apple_health : 0,
+    manual: isDataConnected ? w.other : 0,
+  }));
+  const maxWeekTotal = Math.max(1, ...weeklyBars.map((w) => w.apple + w.manual));
 
-  const maxWeekTotal = Math.max(85, ...weeklyBars.map((w) => w.apple + w.manual));
-
-  const metricBreakdown = [
-    { name: 'Sleep Duration (sleep_min)', count: isDataConnected ? 270 + Math.round(extraBatch * 0.35) : 0, coverage: isDataConnected ? 97 : 0, color: 'var(--branch-open)' },
-    { name: 'Daily Steps (steps)', count: isDataConnected ? 255 + Math.round(extraBatch * 0.35) : 0, coverage: isDataConnected ? 94 : 0, color: 'var(--sub-cyan)' },
-    { name: 'Late Screen Time (late_screen_min)', count: isDataConnected ? 142 + Math.round(extraBatch * 0.15) : 0, coverage: isDataConnected ? 93 : 0, color: 'var(--hyp)' },
-    { name: 'Hydration Logs (water_ml)', count: isDataConnected ? 104 + Math.round(extraBatch * 0.1) : 0, coverage: isDataConnected ? 87 : 0, color: 'var(--sub-emerald)' },
-    { name: 'Headache & Mood Check-ins', count: isDataConnected ? 76 + Math.round(extraBatch * 0.05) : 0, coverage: isDataConnected ? 100 : 0, color: 'var(--amb)' },
-  ];
+  const metricBreakdown = (coverage?.metrics ?? []).map((m, idx) => ({
+    name: `${m.title} (${m.metric})`,
+    count: isDataConnected ? m.count : 0,
+    coverage: isDataConnected ? m.coverage_pct : 0,
+    color: METRIC_COLORS[idx % METRIC_COLORS.length],
+  }));
 
   return (
     <div className="h-full overflow-y-auto p-7 max-w-5xl mx-auto space-y-6">
@@ -325,7 +350,7 @@ export const ConnectDataView: React.FC<{
             <div>
               <div className="flex items-center gap-1.5 font-mono text-[10px] text-branchOpen">
                 <BarChart3 className="w-3.5 h-3.5" />
-                <span>UPLOADED DATA VOLUME BY WEEK (90 DAYS)</span>
+                <span>RECORDS BY WEEK ({coverage?.days ?? 0} DAYS)</span>
               </div>
               <h2 className="mt-1 text-[16px] font-semibold text-t1">
                 {totalRecords.toLocaleString()} Normalized Observations Stored
@@ -338,7 +363,7 @@ export const ConnectDataView: React.FC<{
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: 'var(--sub-cyan)' }} />
-                Manual / Voice
+                Manual check-ins + Screen Time
               </span>
             </div>
           </div>
@@ -426,7 +451,7 @@ export const ConnectDataView: React.FC<{
           <div>
             <div className="flex items-center gap-1.5 font-mono text-[10px] text-subCyan">
               <Database className="w-3.5 h-3.5" />
-              <span>METRIC BREAKDOWN &amp; 90-DAY COVERAGE</span>
+              <span>RECORDS PER SIGNAL &amp; DAYS COVERED ({coverage?.days ?? 0} DAYS)</span>
             </div>
             <h2 className="mt-1 text-[16px] font-semibold text-t1">Records by Health Signal</h2>
           </div>
@@ -462,42 +487,77 @@ export const ConnectDataView: React.FC<{
           className="rounded-2xl p-5 space-y-4"
           style={{ backgroundColor: 'var(--s1)', border: '1px solid var(--border)' }}
         >
-          <h2 className="text-[14.5px] font-semibold text-t1">Upload Apple Health XML, Health Connect ZIP or CSV</h2>
+          <h2 className="text-[14.5px] font-semibold text-t1">Import your Apple Health export</h2>
           <label
             className="flex flex-col items-center justify-center p-8 rounded-xl border-2 border-dashed cursor-pointer transition-colors"
             style={{ borderColor: 'var(--border-strong)', backgroundColor: 'var(--bg)' }}
           >
             <FileUp className="w-7 h-7 text-branchOpen mb-2.5" />
             <span className="text-[13px] font-medium text-t1 text-center">
-              Drop export.xml, Health Connect ZIP, or CSV
+              Choose export.zip or export.xml
             </span>
             <span className="mt-1 font-mono text-[10.5px] text-t3 text-center">
-              Stream-parsed · updates uploaded records graph live
+              Stream-parsed · saved to its own private database, separate from the demo
             </span>
             <input
               type="file"
               className="hidden"
-              accept=".xml,.csv,.zip,.json"
-              onChange={(e) => handleFile(e.target.files?.[0])}
+              accept=".xml,.zip"
+              disabled={uploadState === 'processing'}
+              onChange={(e) => {
+                handleFile(e.target.files?.[0]);
+                e.target.value = ''; // lets the same file be chosen again
+              }}
             />
           </label>
 
           {uploadState === 'processing' && (
             <div className="font-mono text-[11.5px] text-branchOpen">
-              Stream-parsing {lastFile} · stripping DOB, owner name &amp; GPS...
+              Importing {lastFile} · leaving out your name, birth date and other profile details...
             </div>
           )}
-          {uploadState === 'done' && (
+          {uploadState === 'error' && (
             <div
+              role="alert"
               className="rounded-xl px-3.5 py-2.5 flex items-center gap-2 text-[12px] font-medium"
+              style={{
+                backgroundColor: 'rgba(255, 77, 109, 0.12)',
+                border: '1px solid rgba(255, 77, 109, 0.35)',
+                color: 'var(--change)',
+              }}
+            >
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{uploadError}</span>
+            </div>
+          )}
+          {uploadState === 'done' && importResult && (
+            <div
+              className="rounded-xl px-3.5 py-2.5 space-y-1.5 text-[12px]"
               style={{
                 backgroundColor: 'rgba(16, 185, 129, 0.12)',
                 border: '1px solid rgba(16, 185, 129, 0.35)',
                 color: 'var(--ok)',
               }}
             >
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>+148 cleaned records merged from {lastFile} (0 PII fields retained)</span>
+              <div className="flex items-center gap-2 font-medium">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>
+                  {importResult.source_file}: read {importResult.records_read.toLocaleString()} records, used{' '}
+                  {importResult.records_used.toLocaleString()}
+                  {importResult.profile_skipped ? ' · profile details left out' : ''}
+                </span>
+              </div>
+              <div className="font-mono text-[10.5px] text-t2">
+                {Object.keys(importResult.observations).length === 0
+                  ? importResult.already_present > 0
+                    ? `Nothing new: all ${importResult.already_present} days were already imported.`
+                    : 'No sleep, steps, water, caffeine or headache records found in this file.'
+                  : Object.entries(importResult.observations)
+                      .map(([metric, n]) => `${metric}: ${n} days`)
+                      .join(' · ')}
+                {importResult.first_date && ` · ${importResult.first_date} to ${importResult.last_date}`}
+                {importResult.excluded > 0 && ` · ${importResult.excluded} implausible readings excluded`}
+              </div>
             </div>
           )}
         </div>
@@ -582,7 +642,7 @@ export const ConnectDataView: React.FC<{
 const PRIVACY_FAQS = [
   {
     q: 'Does my raw Apple Health file or exact timestamped log ever go to the AI?',
-    a: 'Never. Python parses your file, computes rolling 30-day medians and pattern counts, and sends only compact aggregated summaries (e.g., "sleep averaged 6h 02m, records sl_0412–sl_0425") to Amazon Bedrock.',
+    a: 'Never. Python parses your file, computes rolling 30-day medians and pattern counts, and sends only compact aggregated summaries (for example a count like "4 of 5 headache days" plus the record IDs behind it) to Amazon Bedrock.',
   },
   {
     q: 'How are personal names, phone numbers, Aadhaar, and PAN protected?',
@@ -613,30 +673,14 @@ export const PrivacyView: React.FC<{
   onInspectPayload: () => void;
   onDeleteAllData: () => void;
   onReloadDemo: () => void;
-}> = ({ theme, isDataConnected, onThemeChange, onInspectPayload, onDeleteAllData, onReloadDemo }) => {
+  getExportMarkdown: () => string;
+}> = ({ theme, isDataConnected, onThemeChange, onInspectPayload, onDeleteAllData, onReloadDemo, getExportMarkdown }) => {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [exportedNote, setExportedNote] = useState(false);
 
   const handleDownloadObsidianNote = () => {
-    const md = `---
-roottrace_export: true
-exported_at: ${new Date().toISOString()}
-privacy_mode: presidio_plus_bedrock_mumbai
----
-
-# RootTrace Personal Knowledge Vault
-
-## Verified Knowledge
-- **Oct 22, 2026** — Caffeine after 4 PM cuts my sleep by about 30 min *(Confidence: Medium · Records: [[sl_0412]], [[sl_0413]])*
-
-## Active Investigation: Why do I keep getting headaches?
-- **Triggered by:** Sleep down 47 min on Nov 3 (PELT change detection)
-- **Rank #1 Hypothesis (72%):** Short sleep — 4 of 5 headache days followed nights under 6 hours ([[sl_0412]], [[hd_0031]])
-- **Locked Experiment:** Lights out by 11:30 PM for 10 nights (Criterion locked Nov 10 via SQLite trigger · 80% adherence)
-
-> *Personal pattern, not medical advice. Raw health records were never transmitted to external AI models.*
-`;
+    const md = getExportMarkdown();
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

@@ -40,7 +40,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  const initials = (user?.full_name || 'Satwik')
+  const initials = (user?.full_name || 'RootTrace User')
     .split(/\s+/)
     .map((p) => p[0])
     .join('')

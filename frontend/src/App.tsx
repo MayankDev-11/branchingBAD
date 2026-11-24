@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { api } from './api';
+import { api, USE_MOCK } from './api';
+import { buildObsidianNote } from './obsidianExport';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { GraphCanvas } from './components/graph/GraphCanvas';
@@ -19,6 +20,7 @@ import type {
   BranchDetailResponse,
   CreateBranchInput,
   GraphResponse,
+  InsightsResponse,
   NavView,
   RecordDetailResponse,
   ThemeMode,
@@ -48,8 +50,10 @@ export const App: React.FC = () => {
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<BranchDetailResponse | null>(null);
 
-  const [totalRecords, setTotalRecords] = useState(847);
+  // Record counts come from GET /api/insights (computed in Python), never a hand-typed number.
+  const [insights, setInsights] = useState<InsightsResponse | null>(null);
   const [isDataConnected, setIsDataConnected] = useState(true);
+  const totalRecords = isDataConnected ? insights?.coverage.total_observations ?? 0 : 0;
 
   const [askResult, setAskResult] = useState<AskResponse | null>(null);
   const [askQuestion, setAskQuestion] = useState<string | null>(null);
@@ -72,6 +76,8 @@ export const App: React.FC = () => {
   const loadInitialData = useCallback(async () => {
     try {
       setErrorMsg(null);
+      // Insights load on their own so the graph still shows if that one request fails.
+      const insightsRequest = api.getInsights().then(setInsights);
       const [g, br0, br1] = await Promise.all([
         api.getGraph(),
         api.getBranch('br_0'),
@@ -80,7 +86,7 @@ export const App: React.FC = () => {
       setGraph(g);
       setBranchDetailsMap({ br_0: br0, br_1: br1 });
       setIsDataConnected(true);
-      setTotalRecords((prev) => (prev === 0 ? 847 : prev));
+      await insightsRequest;
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to load RootTrace data');
     }
@@ -174,21 +180,16 @@ export const App: React.FC = () => {
     setDemoDaysAdvanced(days);
     const updatedGraph = await api.advanceClock(days);
     setGraph(updatedGraph);
-    const br1 = await api.getBranch('br_1');
-    setBranchDetailsMap((prev) => ({ ...prev, br_1: br1 }));
+    const [br0, br1, ins] = await Promise.all([api.getBranch('br_0'), api.getBranch('br_1'), api.getInsights()]);
+    setBranchDetailsMap((prev) => ({ ...prev, br_0: br0, br_1: br1 }));
+    setInsights(ins);
     if (selectedBranchId === 'br_1') {
       setSelectedBranch(br1);
     }
   };
 
-  const handleDataUploaded = (added: number) => {
-    setIsDataConnected(true);
-    setTotalRecords((prev) => prev + added);
-  };
-
   const handleDeleteAllData = () => {
     setIsDataConnected(false);
-    setTotalRecords(0);
   };
 
   const openNewBranch = (mode: 'manual' | 'voice') => {
@@ -224,6 +225,7 @@ export const App: React.FC = () => {
           changeCount={changeCount}
           openCount={openCount}
           totalRecords={totalRecords}
+          dayCount={insights?.coverage.days ?? 0}
           isDataConnected={isDataConnected}
           isAsking={isAsking}
           onAskSubmit={handleAskSubmit}
@@ -262,6 +264,7 @@ export const App: React.FC = () => {
                     {graph ? (
                       <GraphCanvas
                         graph={graph}
+                        insights={insights}
                         branchDetailsMap={branchDetailsMap}
                         selectedBranchId={selectedBranchId}
                         isRightPanelOpen={isRightPanelOpen}
@@ -309,18 +312,21 @@ export const App: React.FC = () => {
                     )}
                   </AnimatePresence>
                 </>
-              ) : activeView === 'insights' && graph ? (
+              ) : activeView === 'insights' && insights ? (
                 <div className="flex-1 min-w-0 h-full">
                   <InsightsView
+                    insights={insights}
                     graph={graph}
-                    branch={branchDetailsMap['br_1'] ?? null}
                     onOpenRecord={handleOpenRecord}
                     onOpenGraphBranch={(id) => handleSelectBranch(id, 'investigations')}
                   />
                 </div>
-              ) : activeView === 'history' ? (
+              ) : activeView === 'history' && graph ? (
                 <div className="flex-1 min-w-0 h-full">
                   <HistoryReplayView
+                    graph={graph}
+                    branchDetailsMap={branchDetailsMap}
+                    insights={insights}
                     onOpenRecord={handleOpenRecord}
                     onJumpToBranch={(id) => handleSelectBranch(id, 'investigations')}
                   />
@@ -330,6 +336,7 @@ export const App: React.FC = () => {
                   <ProfileView
                     theme={theme}
                     totalRecords={totalRecords}
+                    insights={insights}
                     isDataConnected={isDataConnected}
                     onThemeChange={setTheme}
                     onGoConnect={() => setActiveView('connect')}
@@ -339,8 +346,8 @@ export const App: React.FC = () => {
                 <div className="flex-1 min-w-0 h-full">
                   <ConnectDataView
                     totalRecords={totalRecords}
+                    insights={insights}
                     isDataConnected={isDataConnected}
-                    onDataUploaded={handleDataUploaded}
                     onReloadDemo={loadInitialData}
                   />
                 </div>
@@ -350,8 +357,14 @@ export const App: React.FC = () => {
                     theme={theme}
                     isDataConnected={isDataConnected}
                     onThemeChange={setTheme}
-                    onInspectPayload={() => handleOpenRecord('sl_0412', 'ai')}
+                    onInspectPayload={() => {
+                      const firstId = insights?.sleep_shift?.record_ids[0] ?? insights?.days[insights.days.length - 1]?.sleep_id;
+                      if (firstId) handleOpenRecord(firstId, 'ai');
+                    }}
                     onDeleteAllData={handleDeleteAllData}
+                    getExportMarkdown={() =>
+                      graph ? buildObsidianNote(graph, branchDetailsMap, insights) : '# RootTrace\n\nData not loaded yet.\n'
+                    }
                     onReloadDemo={loadInitialData}
                   />
                 </div>
@@ -363,7 +376,7 @@ export const App: React.FC = () => {
 
       <RecordModal
         record={modalRecord}
-        askContext={askResult ?? api.getDefaultAskSample()}
+        askContext={USE_MOCK ? askResult ?? api.getDefaultAskSample() : askResult}
         initialTab={modalTab}
         onClose={() => setModalRecord(null)}
       />

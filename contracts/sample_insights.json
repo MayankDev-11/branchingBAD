@@ -1,0 +1,210 @@
+{
+  "as_of": "2026-11-20",
+  "sleep_shift": {
+    "change_event_id": "ce_1",
+    "date": "2026-11-03",
+    "delta_min": -47,
+    "before_median_min": 426,
+    "after_median_min": 379,
+    "post_window_days": 10,
+    "normal_low_min": 406,
+    "normal_high_min": 445,
+    "normal_median_min": 426,
+    "baseline_days": 30,
+    "record_ids": [
+      "sl_0071",
+      "sl_0072",
+      "sl_0073",
+      "sl_0074",
+      "sl_0075"
+    ]
+  },
+  "days": [
+    {
+      "date": "2026-11-18",
+      "sleep": 456,
+      "sleep_id": "sl_0086",
+      "water": 1840,
+      "water_id": "wt_0086",
+      "screen": 13,
+      "screen_id": "sc_0086",
+      "headache": false,
+      "headache_id": "hd_0086"
+    },
+    {
+      "date": "2026-11-19",
+      "sleep": 441,
+      "sleep_id": "sl_0087",
+      "water": 2040,
+      "water_id": "wt_0087",
+      "screen": 17,
+      "screen_id": "sc_0087",
+      "headache": false,
+      "headache_id": "hd_0087"
+    },
+    {
+      "date": "2026-11-20",
+      "sleep": 448,
+      "sleep_id": "sl_0088",
+      "water": 1710,
+      "water_id": "wt_0088",
+      "screen": 82,
+      "screen_id": "sc_0088",
+      "headache": false,
+      "headache_id": "hd_0088"
+    }
+  ],
+  "screen": {
+    "weeks": [
+      {
+        "week_start": "2026-11-03",
+        "avg_min": 75,
+        "days": 7
+      },
+      {
+        "week_start": "2026-11-10",
+        "avg_min": 44,
+        "days": 7
+      },
+      {
+        "week_start": "2026-11-17",
+        "avg_min": 32,
+        "days": 4
+      }
+    ],
+    "before_avg_min": 23,
+    "after_avg_min": 53
+  },
+  "hypotheses": [
+    {
+      "branch_id": "br_1",
+      "branch_title": "Why do I keep getting headaches?",
+      "rank": 1,
+      "label": "Short sleep",
+      "confidence": 60,
+      "k": 4,
+      "n": 5,
+      "j": 1,
+      "m": 5,
+      "claim": "4 of 5 headache days followed nights under 6 hours",
+      "record_ids": [
+        "sl_0071",
+        "hd_0071",
+        "sl_0072",
+        "hd_0072",
+        "sl_0075",
+        "hd_0075"
+      ]
+    },
+    {
+      "branch_id": "br_1",
+      "branch_title": "Why do I keep getting headaches?",
+      "rank": 2,
+      "label": "Low water intake",
+      "confidence": 40,
+      "k": 3,
+      "n": 5,
+      "j": 1,
+      "m": 5,
+      "claim": "3 of 5 headache days had water below 1 L",
+      "record_ids": [
+        "wt_0072",
+        "hd_0072",
+        "wt_0077",
+        "hd_0077",
+        "wt_0079",
+        "hd_0079"
+      ]
+    }
+  ],
+  "experiment": {
+    "id": "exp_1",
+    "branch_id": "br_1",
+    "description": "Lights out by 11:30 PM every night",
+    "success_criterion": "Sleep must exceed 7 hours on at least 7 of 10 nights",
+    "metric": "sleep_min",
+    "threshold": 420,
+    "min_days": 7,
+    "duration_days": 10,
+    "days_elapsed": 8,
+    "adherence_pct": 88,
+    "status": "active",
+    "nights": [
+      {
+        "date": "2026-11-20",
+        "value": 448,
+        "record_id": "sl_0088",
+        "met": true
+      },
+      {
+        "date": "2026-11-21",
+        "value": null,
+        "record_id": null,
+        "met": null
+      },
+      {
+        "date": "2026-11-22",
+        "value": null,
+        "record_id": null,
+        "met": null
+      }
+    ],
+    "nights_met": 7,
+    "nights_logged": 8
+  },
+  "knowledge_count": 1,
+  "coverage": {
+    "total_observations": 704,
+    "excluded": 0,
+    "days": 88,
+    "metrics": [
+      {
+        "metric": "sleep_min",
+        "title": "Sleep",
+        "count": 88,
+        "coverage_pct": 100
+      },
+      {
+        "metric": "steps",
+        "title": "Steps",
+        "count": 88,
+        "coverage_pct": 100
+      },
+      {
+        "metric": "screen_late_min",
+        "title": "Late screen time",
+        "count": 88,
+        "coverage_pct": 100
+      }
+    ],
+    "sources": [
+      {
+        "source_file": "manual_checkins.sqlite",
+        "device": "Manual entry",
+        "count": 352
+      },
+      {
+        "source_file": "apple_health_export.xml",
+        "device": "iPhone 15 Pro",
+        "count": 264
+      },
+      {
+        "source_file": "screen_time_export.csv",
+        "device": "iPhone 15 Pro",
+        "count": 88
+      }
+    ],
+    "weekly": [
+      {
+        "week_start": "2026-11-10",
+        "apple_health": 21,
+        "other": 35
+      },
+      {
+        "week_start": "2026-11-17",
+        "apple_health": 12,
+        "other": 20
+      }
+    ]
+  }
+}

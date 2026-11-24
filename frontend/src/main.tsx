@@ -6,6 +6,7 @@ import { ProtectedRoute } from './auth/ProtectedRoute';
 import { LandingPage } from './pages/LandingPage';
 import { AuthPage } from './pages/AuthPage';
 import { App } from './App';
+import './fonts';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

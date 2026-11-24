@@ -13,88 +13,91 @@ interface PreviewNode {
   summary: string;
 }
 
+// The landing page is public (no sign-in), so it can't call the API. These nodes copy the
+// demo's real records and results (seed 42, demo clock 20 Nov): the IDs, values and counts
+// are exactly what the dashboard shows after "Judge Demo".
 const PREVIEW_NODES: PreviewNode[] = [
   {
-    id: 'OBS-412',
-    shortLabel: 'Wearable Signal',
+    id: 'sl_0071',
+    shortLabel: 'Sleep: 5h 52m',
     layerLabel: 'Layer 01 · Raw Signal',
     x: 92,
     y: 78,
     timestamp: '2026-11-03 06:48 IST',
-    source: 'wearable_export.csv (SHA-256 verified)',
-    rule: '30-day rolling median baseline = 64 ms HRV',
-    summary: 'Overnight HRV & sleep stages ingested locally with zero cloud sync.',
+    source: 'apple_health_export.xml · iPhone 15 Pro',
+    rule: 'Stored as 352 minutes; observations are never edited',
+    summary: 'Night ending 3 Nov, imported from the Apple Health export and kept unchanged.',
   },
   {
-    id: 'HAB-089',
-    shortLabel: 'Habit Observation',
+    id: 'hd_0071',
+    shortLabel: 'Headache logged',
     layerLabel: 'Layer 01 · Daily Log',
     x: 92,
     y: 204,
-    timestamp: '2026-11-02 16:35 IST',
-    source: 'local_habit_log.sqlite',
-    rule: 'Logged tag: caffeine > 120 mg after 14:00',
-    summary: 'Structured daily habit tag linked by date without duplicating raw rows.',
+    timestamp: '2026-11-03 15:20 IST',
+    source: 'manual_checkins.sqlite',
+    rule: 'Symptom check-in stored as a yes/no flag',
+    summary: 'A headache reported the afternoon after a short night.',
   },
   {
-    id: 'CHG-104',
-    shortLabel: 'Change-Point (-14%)',
+    id: 'ce_1',
+    shortLabel: 'Sleep down 47 min',
     layerLabel: 'Layer 02 · Deterministic',
     x: 278,
     y: 78,
     isSignal: true,
-    timestamp: '2026-11-03 · 6d window',
-    source: 'Python CUSUM + PELT detector',
-    rule: '5 of 6 nights > 2 MAD below personal median (p = 0.004)',
-    summary: 'Resting HRV dropped -14% against your personal baseline.',
+    timestamp: 'From 2026-11-03',
+    source: 'Python: ruptures PELT + 30-day median/MAD rule',
+    rule: 'Normal 7h 06m before 3 Nov; 6h 19m over the next 10 days',
+    summary: 'Sleep shifted 47 minutes below your own 30-day normal and stayed there.',
   },
   {
-    id: 'HYP-021',
-    shortLabel: 'Hypothesis: Caffeine',
+    id: 'Hyp #1',
+    shortLabel: 'Short sleep · 60%',
     layerLabel: 'Layer 02 · Hypothesis',
     x: 278,
     y: 204,
-    timestamp: '2026-11-05 09:12 IST',
-    source: 'Competing hypothesis matrix (Rank #1)',
-    rule: 'Co-occurred on 5 of 6 low-HRV nights; 1 counterexample kept',
-    summary: 'Post-2 PM caffeine delays cardiac recovery and suppresses overnight HRV.',
+    timestamp: 'Opened 2026-11-07',
+    source: 'Pattern finder: 3 competing explanations, ranked',
+    rule: '4 of 5 headache days followed nights under 6 h; 1 of 5 other days did too',
+    summary: 'Ranked first of three explanations. The counterexample is kept, not hidden.',
   },
   {
-    id: 'EXP-004',
-    shortLabel: 'N=1 Experiment',
+    id: 'exp_1',
+    shortLabel: 'Lights out 11:30 PM',
     layerLabel: 'Layer 03 · Locked Trial',
     x: 468,
     y: 94,
-    timestamp: '2026-11-06 -> 2026-11-20',
-    source: 'SQLite locked_criterion trigger',
-    rule: 'Locked target: HRV recovers >= +10% across >= 75% adherent days',
-    summary: '14-day caffeine cutoff pre-registered before start; evaluated by Python.',
+    timestamp: '2026-11-13 → 2026-11-22',
+    source: 'SQLite lock_criterion trigger (locked 12 Nov)',
+    rule: 'Sleep must exceed 7 hours on at least 7 of 10 nights',
+    summary: 'The success rule was locked before night 1; Python decides the result.',
   },
   {
-    id: 'AGN-009',
-    shortLabel: 'Read-Only Agent Note',
+    id: 'AI note',
+    shortLabel: 'Read-only AI summary',
     layerLabel: 'Layer 03 · Cited Synthesis',
     x: 468,
     y: 214,
-    timestamp: '2026-11-20 08:05 IST',
-    source: 'Read-only collaborator (writes blocked)',
-    rule: 'Mandatory citation check passed: [OBS-412, CHG-104, EXP-004]',
-    summary: 'Plain-language synthesis strictly bounded to verified record IDs.',
+    timestamp: 'On request',
+    source: 'Claude Haiku 4.5 on Bedrock, read-only tools',
+    rule: 'Every claim must cite real record IDs, e.g. [sl_0071, hd_0071]',
+    summary: 'Explains the verified counts in plain language; uncited claims are dropped.',
   },
 ];
 
 const PREVIEW_EDGES: Array<{ from: string; to: string; signal?: boolean; dashed?: boolean }> = [
-  { from: 'OBS-412', to: 'CHG-104', signal: true },
-  { from: 'HAB-089', to: 'HYP-021' },
-  { from: 'CHG-104', to: 'HYP-021', signal: true },
-  { from: 'CHG-104', to: 'EXP-004' },
-  { from: 'HYP-021', to: 'EXP-004' },
-  { from: 'EXP-004', to: 'AGN-009', dashed: true },
-  { from: 'HYP-021', to: 'AGN-009', dashed: true },
+  { from: 'sl_0071', to: 'ce_1', signal: true },
+  { from: 'hd_0071', to: 'Hyp #1' },
+  { from: 'ce_1', to: 'Hyp #1', signal: true },
+  { from: 'ce_1', to: 'exp_1' },
+  { from: 'Hyp #1', to: 'exp_1' },
+  { from: 'exp_1', to: 'AI note', dashed: true },
+  { from: 'Hyp #1', to: 'AI note', dashed: true },
 ];
 
 export const EvidenceGraphPreview: React.FC = () => {
-  const [selectedId, setSelectedId] = useState<string>('CHG-104');
+  const [selectedId, setSelectedId] = useState<string>('ce_1');
   const selected = PREVIEW_NODES.find((n) => n.id === selectedId) ?? PREVIEW_NODES[2];
 
   const byId = Object.fromEntries(PREVIEW_NODES.map((n) => [n.id, n]));
@@ -138,7 +141,7 @@ export const EvidenceGraphPreview: React.FC = () => {
           viewBox="0 0 560 280"
           className="w-full h-auto block"
           role="img"
-          aria-label="Interactive RootTrace evidence graph showing 6 nodes across signals, change-point detection, and experiments"
+          aria-label="Interactive RootTrace evidence graph: a sleep record and a headache log, the 3 Nov sleep drop, the top hypothesis, the locked experiment and the AI summary"
         >
           {/* Smooth Bezier edges */}
           {PREVIEW_EDGES.map((edge) => {
