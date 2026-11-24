@@ -10,3 +10,9 @@ __pycache__/
 
 data/uploads/
 data/real_health_exports/
+
+# frontend
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
