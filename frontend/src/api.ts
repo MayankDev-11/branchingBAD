@@ -4,6 +4,7 @@ import sampleGraph from './contracts/sample_graph.json';
 import sampleBranch from './contracts/sample_branch.json';
 import sampleRecord from './contracts/sample_record.json';
 import sampleAsk from './contracts/sample_ask.json';
+import sampleInsights from './contracts/sample_insights.json';
 import type {
   AskResponse,
   BranchDetailResponse,
@@ -11,6 +12,8 @@ import type {
   ExperimentInfo,
   GraphBranch,
   GraphResponse,
+  ImportSummary,
+  InsightsResponse,
   RecordDetailResponse,
 } from './types';
 
@@ -413,6 +416,27 @@ export const api = {
         })
       : await fetch(`${API_BASE}/api/demo/reset`, { method: 'POST', credentials: 'include' });
     if (!res.ok) throw new Error(`Demo advance failed (${res.status})`);
+    return res.json();
+  },
+
+  async getInsights(): Promise<InsightsResponse> {
+    if (USE_MOCK) return structuredClone(sampleInsights) as InsightsResponse;
+    const res = await fetch(`${API_BASE}/api/insights`, { credentials: 'include' });
+    if (!res.ok) throw new Error(`GET /api/insights failed (${res.status})`);
+    return res.json();
+  },
+
+  // Sends the raw file (not multipart) so a multi-hundred-MB export streams straight to disk.
+  async importAppleHealth(file: File): Promise<ImportSummary> {
+    if (USE_MOCK) throw new Error('Uploading needs the backend (USE_MOCK is on)');
+    const res = await fetch(
+      `${API_BASE}/api/import/apple-health?filename=${encodeURIComponent(file.name)}`,
+      { method: 'POST', credentials: 'include', body: file }
+    );
+    if (!res.ok) {
+      const detail = await res.json().then((d) => d?.detail as string | undefined).catch(() => undefined);
+      throw new Error(detail ?? `Upload failed (${res.status})`);
+    }
     return res.json();
   },
 

@@ -25,6 +25,15 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { alternatingY, dateToX, TRUNK_Y } from './graph/graphMath';
+import type {
+  BranchDetailResponse,
+  BranchHypothesis,
+  ExperimentInfo,
+  GraphBranch,
+  GraphResponse,
+  InsightsResponse,
+  KnowledgeItem,
+} from '../types';
 import {
   AnchorNode,
   BranchHubNode,
@@ -69,147 +78,232 @@ interface HistoryMilestone {
   recordIds: string[];
 }
 
-const ALL_MILESTONES: HistoryMilestone[] = [
-  {
+// ---------------------------------------------------------------------------------------------
+// The replay is built from the live API data (graph, branch details, insights), so every date,
+// count and percentage matches the dashboard and comes from Python (rule 9). A step that has
+// not happened yet at the demo clock (e.g. the headache branch being solved) is not shown.
+// ---------------------------------------------------------------------------------------------
+const shortDate = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+const longLabel = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+const hm = (min: number) => `${Math.floor(min / 60)}h ${String(Math.round(min % 60)).padStart(2, '0')}m`;
+const claimCount = (hyp?: BranchHypothesis) => {
+  const text = hyp?.claims[0]?.text;
+  if (!text) return 'Not enough data yet';
+  const m = text.match(/^(\d+ of \d+ \S+ \S+)/);
+  return m ? m[1] : text;
+};
+const firstIds = (hyp: BranchHypothesis | undefined, count: number) => (hyp?.claims[0]?.record_ids ?? []).slice(0, count);
+const hypStatus = (hyp: BranchHypothesis, idx: number, concluded: boolean, exp?: ExperimentInfo) => {
+  if (!concluded) return 'active' as const;
+  if (idx === 0 && exp?.status === 'supported') return 'supported' as const;
+  if ((hyp.confidence ?? 0) === 0) return 'refuted' as const;
+  return 'active' as const;
+};
+const isoMinusDays = (iso: string, n: number) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10);
+};
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const hypNote =(hyp: BranchHypothesis) => `${hyp.confidence ?? 0}% · ${hyp.claims[0]?.text ?? 'Not enough data yet'}`;
+
+interface HistoryData {
+  graph: GraphResponse;
+  br0?: GraphBranch;
+  br1?: GraphBranch;
+  d0?: BranchDetailResponse;
+  d1?: BranchDetailResponse;
+  kn0?: KnowledgeItem;
+  kn1?: KnowledgeItem;
+  insights: InsightsResponse | null;
+}
+
+const buildMilestones = (d: HistoryData): HistoryMilestone[] => {
+  const steps: HistoryMilestone[] = [];
+  const { graph, br0, br1, d0, d1, kn0, kn1, insights } = d;
+  const shift = insights?.sleep_shift;
+  const titles = insights?.coverage.metrics.map((m) => m.title.toLowerCase()) ?? [];
+
+  steps.push({
     id: 'step_baseline',
-    date: '2026-08-25',
-    dateLabel: 'Aug 25, 2026',
+    date: graph.range.start,
+    dateLabel: longLabel(graph.range.start),
     tag: 'BASELINE TRUNK STARTED',
     tone: 'var(--trunk)',
-    title: 'Personal Baseline Trunk Initialized',
-    whyCreated:
-      'Apple Health export & daily hydration/symptom logs established your 30-day rolling personal normal (sleep 7h 10m ± 25m, steps 7,100/day, water 2.0 L).',
+    title: 'Daily logging starts',
+    whyCreated: `Your first records: ${titles.join(', ') || 'daily health logs'}. RootTrace needs at least 7 days before it works out a 30-day normal.`,
     hypotheses: [],
-    experimentNote: 'No active experiments yet — passive baseline calibration window.',
-    solution: 'Clean reference trunk ready to detect statistically meaningful shifts.',
-    recordIds: ['sl_0412'],
-  },
-  {
-    id: 'step_br0_open',
-    date: '2026-10-01',
-    dateLabel: 'Oct 1, 2026',
-    tag: 'NEW BRANCH SPROUTED',
-    tone: 'var(--branch-open)',
-    title: 'Caffeine after 4 PM & sleep?',
-    branchId: 'br_0',
-    whyCreated:
-      'You noticed slower sleep onset on weekdays and opened an investigation branch to test whether late afternoon coffee was the real culprit or a coincidence.',
-    hypotheses: [
-      { name: 'Late afternoon caffeine (>4 PM)', status: 'active', note: 'Primary suspect based on coffee timestamps' },
-      { name: 'Late dinner timing', status: 'active', note: 'Competing digestive thermal load explanation' },
-      { name: 'Evening workout intensity', status: 'active', note: 'Competing elevated heart-rate explanation' },
-    ],
-    experimentNote: 'Comparing 3 competing explanations before locking an experiment.',
-    solution: 'In progress — evidence gathering across 14 nights.',
-    recordIds: ['sl_0412', 'sl_0413'],
-  },
-  {
-    id: 'step_br0_solved',
-    date: '2026-10-22',
-    dateLabel: 'Oct 22, 2026',
-    tag: 'BRANCH SOLVED · MELTED',
-    tone: 'var(--ok)',
-    title: 'Solved: Caffeine after 4 PM cuts sleep ~30 min',
-    branchId: 'br_0',
-    whyCreated:
-      'Completed a 14-day locked experiment (zero caffeine after 4 PM, 93% adherence). Python compared experiment sleep against your frozen Oct 1 baseline.',
-    hypotheses: [
-      { name: 'Late afternoon caffeine (>4 PM)', status: 'supported', note: '84% support · +31 min sleep recovered on cutoff nights' },
-      { name: 'Late dinner timing', status: 'refuted', note: '18% · no consistent median sleep shift' },
-      { name: 'Evening workout intensity', status: 'refuted', note: '12% · weak correlation across 14 nights' },
-    ],
-    experimentNote: 'Locked criterion met: average sleep rose >= 25 min across 13 of 14 adherent nights.',
-    solution:
-      'All 3 sub-branches melted into one verified Knowledge conclusion: cut off caffeine by 4 PM to protect ~30 minutes of sleep.',
-    recordIds: ['sl_0412', 'sl_0413'],
-  },
-  {
-    id: 'step_ce1',
-    date: '2026-11-03',
-    dateLabel: 'Nov 3, 2026',
-    tag: 'CHANGE EVENT DETECTED',
-    tone: 'var(--change)',
-    title: 'PELT Alert: Sleep dropped 47 min',
-    branchId: 'br_1',
-    whyCreated:
-      'Deterministic ruptures (PELT) flagged 5 of 7 consecutive nights more than 2 MAD below your 7h 10m normal, pinning the exact shift onset to November 3.',
-    hypotheses: [],
-    experimentNote: 'System surfaces a red change-event dot on the trunk — never auto-opens a branch without your approval.',
-    solution: 'Prompted investigation into recurring afternoon headaches that began the next day.',
-    recordIds: ['sl_0412', 'sl_0413'],
-  },
-  {
-    id: 'step_br1_open',
-    date: '2026-11-05',
-    dateLabel: 'Nov 5, 2026',
-    tag: 'NEW BRANCH · SHARED LINK',
-    tone: 'var(--branch-open)',
-    title: 'Why do I keep getting headaches?',
-    branchId: 'br_1',
-    whyCreated:
-      'You asked about recurring headaches after the Nov 3 sleep drop. Python extracted cross-signal counts and Bedrock drafted 3 ranked competing hypotheses (1 uncited claim dropped).',
-    hypotheses: [
-      { name: 'Short sleep (<6 hours)', status: 'supported', note: '72% · 4 of 5 headache days followed nights under 6h' },
-      { name: 'Low water intake (<1 L)', status: 'testing', note: '41% · 3 of 5 headache days had low hydration' },
-      { name: 'Screen light before bed', status: 'active', note: '28% · likely upstream driver of late sleep' },
-    ],
-    experimentNote: 'Shared sleep records automatically linked this branch back to your October Caffeine investigation.',
-    solution: 'Short sleep ranked #1; 1 honest counterexample on Nov 9 preserved.',
-    recordIds: ['sl_0412', 'hd_0031', 'wt_0210'],
-  },
-  {
-    id: 'step_br1_exp',
-    date: '2026-11-10',
-    dateLabel: 'Nov 10, 2026',
-    tag: 'CRITERION LOCKED',
-    tone: 'var(--sub-cyan)',
-    title: 'Experiment Locked: Lights out by 11:30 PM (10d)',
-    branchId: 'br_1',
-    whyCreated:
-      'Pre-registered a 10-night controlled sleep intervention with a SQLite database trigger locking the success criterion so goalposts cannot be moved afterward.',
-    hypotheses: [
-      { name: 'Short sleep (<6 hours)', status: 'testing', note: 'Active 10-night experiment · 80% adherence (8/10 nights)' },
-      { name: 'Low water intake (<1 L)', status: 'active', note: 'Queued backup test: 2 L water daily (10d)' },
-      { name: 'Screen light before bed', status: 'active', note: 'Queued backup test: No screens after 10 PM (7d)' },
-    ],
-    experimentNote: 'Locked criterion: Sleep average must exceed 7 hours on >= 7 of 10 nights.',
-    solution: 'On track at 80% adherence; awaiting final 2 nights for Python verdict.',
-    recordIds: ['sl_0412', 'hd_0031', 'wt_0210'],
-  },
-  {
-    id: 'step_br1_solved',
-    date: '2026-11-22',
-    dateLabel: 'Nov 22, 2026',
-    tag: 'RESOLVED · KNOWLEDGE MELTED',
-    tone: 'var(--ok)',
-    title: 'Solved: 11:30 PM bedtime cut headaches by 75%',
-    branchId: 'br_1',
-    whyCreated:
-      'Experiment reached Day 10 at 90% adherence. Python evaluated experiment nights against the frozen Nov 10 baseline and verified the locked criterion was met.',
-    hypotheses: [
-      { name: 'Short sleep (<6 hours)', status: 'supported', note: 'Confirmed primary cause · sleep rose to 7h 18m' },
-      { name: 'Low water intake (<1 L)', status: 'refuted', note: 'Secondary factor; not required once sleep recovered' },
-      { name: 'Screen light before bed', status: 'refuted', note: 'Addressed indirectly by 11:30 PM lights-out boundary' },
-    ],
-    experimentNote: 'Criterion met deterministically in Python (no AI override).',
-    solution:
-      'All 3 headache sub-branches melted into Verified Knowledge: protecting an 11:30 PM bedtime restores sleep above 7h and cuts headaches by 75%.',
-    recordIds: ['sl_0412', 'hd_0031'],
-  },
-];
+    experimentNote: 'No experiments yet: the trunk is only collecting your normal.',
+    solution: 'A clean reference trunk for spotting real shifts later.',
+    recordIds: [],
+  });
+
+  if (br0 && d0) {
+    const exp = d0.experiment;
+    steps.push({
+      id: 'step_br0_open',
+      date: br0.start_date,
+      dateLabel: longLabel(br0.start_date),
+      tag: 'NEW BRANCH SPROUTED',
+      tone: 'var(--branch-open)',
+      title: br0.title,
+      branchId: 'br_0',
+      whyCreated: 'You opened an investigation to test this question against your own records instead of guessing.',
+      hypotheses: d0.hypotheses.map((h) => ({ name: h.label ?? h.text ?? 'Hypothesis', status: 'active', note: hypNote(h) })),
+      experimentNote: `Comparing ${d0.hypotheses.length} competing explanations before locking an experiment.`,
+      solution: exp ? `Next: ${exp.description.toLowerCase()} for ${exp.duration_days} days.` : 'Collecting evidence.',
+      recordIds: firstIds(d0.hypotheses[0], 2),
+    });
+    if (br0.status === 'concluded' && br0.end_date) {
+      steps.push({
+        id: 'step_br0_solved',
+        date: br0.end_date,
+        dateLabel: longLabel(br0.end_date),
+        tag: 'BRANCH SOLVED · MELTED',
+        tone: 'var(--ok)',
+        title: `Solved: ${kn0?.statement ?? br0.title}`,
+        branchId: 'br_0',
+        whyCreated: exp
+          ? `Finished a ${exp.duration_days}-day locked experiment (${exp.description.toLowerCase()}, ${exp.adherence_pct}% adherence). Python compared it with the locked criterion.`
+          : 'Python compared the records with the locked criterion.',
+        hypotheses: d0.hypotheses.map((h, i) => ({
+          name: h.label ?? h.text ?? 'Hypothesis',
+          status: hypStatus(h, i, true, exp),
+          note: hypNote(h),
+        })),
+        experimentNote: exp ? `Locked criterion: ${exp.success_criterion}. Result: ${exp.status.replace('_', ' ')}.` : '',
+        solution: `${d0.hypotheses.length} sub-branches melted into verified knowledge: ${kn0?.statement ?? 'concluded'}.`,
+        recordIds: firstIds(d0.hypotheses[0], 2),
+      });
+    }
+  }
+
+  if (shift) {
+    steps.push({
+      id: 'step_ce1',
+      date: shift.date,
+      dateLabel: longLabel(shift.date),
+      tag: 'CHANGE EVENT DETECTED',
+      tone: 'var(--change)',
+      title: `PELT alert: sleep dropped ${Math.abs(shift.delta_min)} min`,
+      branchId: br1?.id,
+      whyCreated: `Change detection found nights well below your ${hm(shift.before_median_min)} normal starting ${shortDate(
+        shift.date
+      )}; over the next ${shift.post_window_days} days your sleep settled at ${hm(shift.after_median_min)}.`,
+      hypotheses: [],
+      experimentNote: 'Shown as a red dot on the trunk. RootTrace never opens a branch without your approval.',
+      solution: 'A prompt to investigate, not a diagnosis.',
+      recordIds: shift.record_ids.slice(0, 3),
+    });
+  }
+
+  if (br1 && d1) {
+    const exp = d1.experiment;
+    const top = d1.hypotheses[0];
+    steps.push({
+      id: 'step_br1_open',
+      date: br1.start_date,
+      dateLabel: longLabel(br1.start_date),
+      tag: 'NEW BRANCH · SHARED LINK',
+      tone: 'var(--branch-open)',
+      title: br1.title,
+      branchId: 'br_1',
+      whyCreated: `You asked "${br1.title}"${shift ? ` after the ${shortDate(shift.date)} sleep drop` : ''}. Python counted how often each possible trigger came before headache days and before headache-free days.`,
+      hypotheses: d1.hypotheses.map((h) => ({ name: h.label ?? h.text ?? 'Hypothesis', status: 'active', note: hypNote(h) })),
+      experimentNote: 'Shared sleep records link this branch back to the earlier sleep investigation.',
+      solution: top ? `${top.label} ranks first at ${top.confidence ?? 0}% confidence.` : 'Collecting evidence.',
+      recordIds: firstIds(top, 3),
+    });
+    if (exp?.locked && exp.locked_at) {
+      const lockedOn = exp.locked_at.slice(0, 10);
+      steps.push({
+        id: 'step_br1_exp',
+        date: lockedOn,
+        dateLabel: longLabel(lockedOn),
+        tag: 'CRITERION LOCKED',
+        tone: 'var(--sub-cyan)',
+        title: `Experiment locked: ${exp.description} (${exp.duration_days}d)`,
+        branchId: 'br_1',
+        whyCreated: `The success criterion was locked before night 1 (${shortDate(exp.start_date)}). A SQLite trigger stops anyone changing it afterwards.`,
+        hypotheses: d1.hypotheses.map((h, i) => ({
+          name: h.label ?? h.text ?? 'Hypothesis',
+          status: i === 0 ? 'testing' : 'active',
+          note: i === 0 ? `Being tested: ${exp.duration_days}-night experiment from ${shortDate(exp.start_date)}` : `Proposed test: ${h.test}`,
+        })),
+        experimentNote: `Locked criterion: ${exp.success_criterion}.`,
+        solution:
+          br1.status === 'open'
+            ? `Night ${exp.days_elapsed} of ${exp.duration_days}: ${exp.adherence_pct}% adherence so far. Python decides after the last night.`
+            : `Decided by Python: ${exp.status.replace('_', ' ')}.`,
+        recordIds: firstIds(top, 2),
+      });
+    }
+    if (br1.status !== 'open' && br1.end_date) {
+      steps.push({
+        id: 'step_br1_solved',
+        date: br1.end_date,
+        dateLabel: longLabel(br1.end_date),
+        tag: 'RESOLVED · KNOWLEDGE MELTED',
+        tone: 'var(--ok)',
+        title: `Solved: ${kn1?.statement ?? br1.title}`,
+        branchId: 'br_1',
+        whyCreated: exp
+          ? `The experiment reached night ${exp.days_elapsed} at ${exp.adherence_pct}% adherence. Python checked the nights against the locked criterion.`
+          : 'Python checked the records against the locked criterion.',
+        hypotheses: d1.hypotheses.map((h, i) => ({
+          name: h.label ?? h.text ?? 'Hypothesis',
+          status: hypStatus(h, i, true, exp),
+          note: hypNote(h),
+        })),
+        experimentNote: exp ? `Result: ${exp.status.replace('_', ' ')} (decided in Python, never by the AI).` : '',
+        solution: kn1 ? `Verified knowledge: ${kn1.statement}.` : 'Concluded.',
+        recordIds: firstIds(top, 2),
+      });
+    }
+  }
+  return steps.sort((a, b) => a.date.localeCompare(b.date));
+};
 
 interface HistoryReplayViewProps {
+  graph: GraphResponse;
+  branchDetailsMap: Record<string, BranchDetailResponse>;
+  insights: InsightsResponse | null;
   onOpenRecord: (id: string, tab?: 'raw' | 'ai') => void;
   onJumpToBranch: (branchId: string) => void;
 }
 
 const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
+  graph,
+  branchDetailsMap,
+  insights,
   onOpenRecord,
   onJumpToBranch,
 }) => {
   const { fitView } = useReactFlow();
-  const [dateFrom, setDateFrom] = useState('2026-08-25');
-  const [dateTo, setDateTo] = useState('2026-11-22');
+  const data = useMemo<HistoryData>(() => {
+    const br0 = graph.branches.find((b) => b.id === 'br_0');
+    const br1 = graph.branches.find((b) => b.id === 'br_1');
+    const knFor = (b?: GraphBranch) => (b?.end_date ? graph.knowledge.find((k) => k.date === b.end_date) : undefined);
+    return {
+      graph,
+      br0,
+      br1,
+      d0: branchDetailsMap['br_0'],
+      d1: branchDetailsMap['br_1'],
+      kn0: knFor(br0) ?? graph.knowledge[0],
+      kn1: knFor(br1),
+      insights,
+    };
+  }, [graph, branchDetailsMap, insights]);
+  const ALL_MILESTONES = useMemo(() => buildMilestones(data), [data]);
+  const [dateFrom, setDateFrom] = useState(graph.range.start);
+  const [dateTo, setDateTo] = useState(graph.range.end);
+  // When the demo clock moves (+10 days / Reset), extend or shrink the window with it.
+  useEffect(() => {
+    setDateTo(graph.range.end);
+  }, [graph.range.end]);
   const [stepIdx, setStepIdx] = useState(0);
   const [autoPlay, setAutoPlay] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
@@ -235,12 +329,12 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
         hypotheses: [],
         experimentNote: 'Step forward with → to watch branches sprout and melt in real time.',
         solution: 'Baseline trunk loaded for your selected date window.',
-        recordIds: ['sl_0412'],
+        recordIds: [],
       };
       return [startAnchor, ...inside];
     }
     return inside;
-  }, [dateFrom, dateTo]);
+  }, [ALL_MILESTONES, dateFrom, dateTo]);
 
   // Reset to step 0 when date range changes
   useEffect(() => {
@@ -295,8 +389,10 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
   const { nodes, edges } = useMemo(() => {
     const n: Node[] = [];
     const e: Edge[] = [];
-    const rangeStart = '2026-08-25';
+    const rangeStart = graph.range.start;
     const isFresh = (stepId: string) => currentStep.id === stepId;
+    const { br0, br1, d0, d1, kn0, kn1 } = data;
+    const shift = insights?.sleep_shift;
 
     // Trunk grows smoothly from dateFrom -> currentDate (minimum 260px so initial trunk looks clean & alive)
     const startX = Math.max(40, dateToX(rangeStart, dateFrom) - 30);
@@ -307,17 +403,11 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
       { id: 'h-trunk-end', type: 'anchor', position: { x: currentX, y: TRUNK_Y }, data: {} }
     );
 
-    const allTicks = [
-      { date: '2026-08-25', label: 'Aug 25' },
-      { date: '2026-09-10', label: 'Sep 10' },
-      { date: '2026-10-01', label: 'Oct 1' },
-      { date: '2026-10-22', label: 'Oct 22' },
-      { date: '2026-11-03', label: 'Nov 3' },
-      { date: '2026-11-10', label: 'Nov 10' },
-      { date: '2026-11-22', label: 'Nov 22' },
-    ]
-      .filter((t) => t.date >= dateFrom && t.date <= currentDate)
-      .map((t) => ({ x: dateToX(rangeStart, t.date), label: t.label }));
+    // A tick at each milestone date, plus the first and last day of data.
+    const allTicks = [...new Set([graph.range.start, ...ALL_MILESTONES.map((m) => m.date), graph.range.end])]
+      .sort()
+      .filter((d) => d >= dateFrom && d <= currentDate)
+      .map((d) => ({ x: dateToX(rangeStart, d), label: shortDate(d) }));
 
     e.push({
       id: 'h-edge-trunk',
@@ -328,9 +418,10 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
     });
 
     // STEP: Branch 0 (Oct 1) — Upper side of trunk
-    if (revealedIds.has('step_br0_open')) {
+    if (revealedIds.has('step_br0_open') && br0 && d0) {
       const fresh = isFresh('step_br0_open');
       const solved = revealedIds.has('step_br0_solved');
+      const h0 = d0.hypotheses;
       const b0StartX = Math.max(startX + 40, 240);
       const b0HubX = b0StartX + 175;
       const b0HubY = alternatingY(-1, 1);
@@ -343,10 +434,12 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
           position: { x: b0HubX, y: b0HubY },
           data: {
             id: 'br_0',
-            title: 'Caffeine after 4 PM & sleep?',
+            title: br0.title,
             status: solved ? 'concluded' : 'open',
             labelSide: 'below',
-            subtitle: solved ? 'Solved Oct 22 · 3 melted' : 'Opened Oct 1 · 3 competing hypotheses',
+            subtitle: solved
+              ? `Solved ${shortDate(br0.end_date ?? br0.start_date)} · ${h0.length} melted`
+              : `Opened ${shortDate(br0.start_date)} · ${h0.length} competing hypotheses`,
             isSelected: currentStep.branchId === 'br_0',
             animateIn: fresh,
             onSelect: onJumpToBranch,
@@ -363,53 +456,24 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
       });
 
       const sub0X = b0HubX + 275;
-      n.push(
-        {
-          id: 'h-br0-s1',
+      const offsets0 = [-105, 0, 100];
+      h0.slice(0, 3).forEach((h, i) => {
+        n.push({
+          id: `h-br0-s${i + 1}`,
           type: 'subHypothesis',
-          position: { x: sub0X, y: b0HubY - 105 },
+          position: { x: sub0X, y: b0HubY + offsets0[i] },
           data: {
-            rank: 1,
-            label: 'Late caffeine',
-            confidence: solved ? 84 : 60,
-            detail: solved ? 'Supported · -31m sleep' : 'Testing caffeine cutoff',
-            tone: solved ? 'solved' : 'emerald',
+            rank: h.rank,
+            label: h.label ?? h.text ?? 'Hypothesis',
+            confidence: h.confidence ?? 0,
+            detail: claimCount(h),
+            tone: i === 0 ? (solved ? 'solved' : 'emerald') : 'muted',
             compact: true,
             animateIn: fresh,
             onClick: () => onJumpToBranch('br_0'),
           },
-        },
-        {
-          id: 'h-br0-s2',
-          type: 'subHypothesis',
-          position: { x: sub0X, y: b0HubY },
-          data: {
-            rank: 2,
-            label: 'Dinner timing',
-            confidence: 18,
-            detail: solved ? 'Refuted · no shift' : 'Competing hypothesis',
-            tone: 'muted',
-            compact: true,
-            animateIn: fresh,
-            onClick: () => onJumpToBranch('br_0'),
-          },
-        },
-        {
-          id: 'h-br0-s3',
-          type: 'subHypothesis',
-          position: { x: sub0X, y: b0HubY + 100 },
-          data: {
-            rank: 3,
-            label: 'Late workout',
-            confidence: 12,
-            detail: solved ? 'Refuted · weak link' : 'Competing hypothesis',
-            tone: 'muted',
-            compact: true,
-            animateIn: fresh,
-            onClick: () => onJumpToBranch('br_0'),
-          },
-        }
-      );
+        });
+      });
 
       e.push(
         { id: 'h-e-b0s1', source: 'h-br0-hub', target: 'h-br0-s1', type: 'organicBranch', data: { kind: 'sub-emerald', isNewStep: fresh } },
@@ -426,7 +490,7 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
             id: 'h-br0-melt',
             type: 'meltConfluence',
             position: { x: melt0X, y: b0HubY },
-            data: { label: '3 melted -> 1 truth', animateIn: freshSolve, onClick: () => onJumpToBranch('br_0') },
+            data: { label: `${h0.length} melted → 1 truth`, animateIn: freshSolve, onClick: () => onJumpToBranch('br_0') },
           },
           {
             id: 'h-br0-kn',
@@ -434,10 +498,10 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
             position: { x: melt0X + 245, y: b0HubY },
             data: {
               branchId: 'br_0',
-              statement: 'Caffeine after 4 PM cuts my sleep by about 30 min',
-              dateLabel: 'Oct 22',
-              confidence: 'Medium · 14d Exp',
-              recordIds: ['sl_0412', 'sl_0413'],
+              statement: kn0?.statement ?? br0.title,
+              dateLabel: shortDate(kn0?.date ?? br0.end_date ?? br0.start_date),
+              confidence: `${capitalize(kn0?.confidence ?? 'pending')}${d0.experiment ? ` · ${d0.experiment.duration_days}d Exp` : ''}`,
+              recordIds: firstIds(h0[0], 2),
               isNew: freshSolve,
               animateIn: freshSolve,
               onSelectBranch: onJumpToBranch,
@@ -455,15 +519,15 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
     }
 
     // STEP: Change Event (Nov 3)
-    if (revealedIds.has('step_ce1')) {
+    if (revealedIds.has('step_ce1') && shift) {
       const fresh = isFresh('step_ce1');
       n.push({
         id: 'h-ce-1',
         type: 'changeEvent',
-        position: { x: dateToX(rangeStart, '2026-11-03'), y: TRUNK_Y },
+        position: { x: dateToX(rangeStart, shift.date), y: TRUNK_Y },
         data: {
-          label: 'sleep -47 min',
-          dateLabel: 'Nov 3',
+          label: `sleep ${shift.delta_min} min`,
+          dateLabel: shortDate(shift.date),
           spotlight: fresh,
           animateIn: fresh,
           onClick: () => onJumpToBranch('br_1'),
@@ -472,11 +536,13 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
     }
 
     // STEP: Branch 1 (Nov 5) — Alternated cleanly to LOWER side of trunk!
-    if (revealedIds.has('step_br1_open')) {
+    if (revealedIds.has('step_br1_open') && br1 && d1) {
       const fresh = isFresh('step_br1_open');
       const hasExp = revealedIds.has('step_br1_exp');
       const solved = revealedIds.has('step_br1_solved');
-      const b1StartX = dateToX(rangeStart, '2026-11-05');
+      const h1 = d1.hypotheses;
+      const exp1 = d1.experiment;
+      const b1StartX = dateToX(rangeStart, br1.start_date);
       const b1HubX = b1StartX + 185;
       const b1HubY = alternatingY(1, 1);
 
@@ -488,14 +554,14 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
           position: { x: b1HubX, y: b1HubY },
           data: {
             id: 'br_1',
-            title: 'Why do I keep getting headaches?',
+            title: br1.title,
             status: solved ? 'concluded' : 'open',
             labelSide: 'below',
             subtitle: solved
-              ? 'Solved Nov 22 · 3 melted into Knowledge'
-              : hasExp
-              ? 'Locked 10d Experiment · 80% adherence'
-              : 'Opened Nov 5 · 3 competing hypotheses',
+              ? `Solved ${shortDate(br1.end_date ?? br1.start_date)} · ${h1.length} melted into Knowledge`
+              : hasExp && exp1
+              ? `Locked ${exp1.duration_days}d Experiment · ${exp1.adherence_pct}% adherence`
+              : `Opened ${shortDate(br1.start_date)} · ${h1.length} competing hypotheses`,
             isSelected: currentStep.branchId === 'br_1',
             animateIn: fresh,
             onSelect: onJumpToBranch,
@@ -512,50 +578,25 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
       });
 
       const sub1X = b1HubX + 290;
-      n.push(
-        {
-          id: 'h-br1-s1',
+      const offsets1 = [-115, 0, 115];
+      const tones1 = ['emerald', 'cyan', 'muted'] as const;
+      h1.slice(0, 3).forEach((h, i) => {
+        const rid = h.claims[0]?.record_ids[0];
+        n.push({
+          id: `h-br1-s${i + 1}`,
           type: 'subHypothesis',
-          position: { x: sub1X, y: b1HubY - 115 },
+          position: { x: sub1X, y: b1HubY + offsets1[i] },
           data: {
-            rank: 1,
-            label: 'Short sleep',
-            confidence: 72,
-            detail: '4/5 days <6h · sl_0412',
-            tone: solved ? 'solved' : 'emerald',
+            rank: h.rank,
+            label: h.label ?? h.text ?? 'Hypothesis',
+            confidence: h.confidence ?? 0,
+            detail: rid ? `${claimCount(h)} · ${rid}` : claimCount(h),
+            tone: i === 0 && solved ? 'solved' : tones1[i],
             animateIn: fresh,
             onClick: () => onJumpToBranch('br_1'),
           },
-        },
-        {
-          id: 'h-br1-s2',
-          type: 'subHypothesis',
-          position: { x: sub1X, y: b1HubY },
-          data: {
-            rank: 2,
-            label: 'Low water intake',
-            confidence: 41,
-            detail: '3/5 days <1 L · wt_0210',
-            tone: 'cyan',
-            animateIn: fresh,
-            onClick: () => onJumpToBranch('br_1'),
-          },
-        },
-        {
-          id: 'h-br1-s3',
-          type: 'subHypothesis',
-          position: { x: sub1X, y: b1HubY + 115 },
-          data: {
-            rank: 3,
-            label: 'Screen light',
-            confidence: 28,
-            detail: 'Upstream sleep driver',
-            tone: 'muted',
-            animateIn: fresh,
-            onClick: () => onJumpToBranch('br_1'),
-          },
-        }
-      );
+        });
+      });
 
       e.push(
         { id: 'h-e-b1s1', source: 'h-br1-hub', target: 'h-br1-s1', type: 'organicBranch', data: { kind: 'sub-emerald', isNewStep: fresh } },
@@ -574,50 +615,52 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
       }
 
       // STEP: Locked Experiment + Evidence Twigs (Nov 10)
-      if (hasExp && !solved) {
+      if (hasExp && !solved && exp1) {
         const freshExp = isFresh('step_br1_exp');
         const twigX = sub1X + 275;
-        n.push(
-          {
-            id: 'h-br1-exp',
-            type: 'experimentLeaf',
-            position: { x: twigX + 15, y: b1HubY - 145 },
-            data: {
-              description: 'Lights out 11:30 PM (10d)',
-              adherence: 80,
-              locked: true,
-              animateIn: freshExp,
-              onClick: () => onJumpToBranch('br_1'),
-            },
+        n.push({
+          id: 'h-br1-exp',
+          type: 'experimentLeaf',
+          position: { x: twigX + 15, y: b1HubY - 145 },
+          data: {
+            description: `${exp1.description} (${exp1.duration_days}d)`,
+            adherence: exp1.adherence_pct,
+            locked: exp1.locked,
+            animateIn: freshExp,
+            onClick: () => onJumpToBranch('br_1'),
           },
-          {
-            id: 'h-ev-sl',
+        });
+        e.push({ id: 'h-e-exp', source: 'h-br1-s1', target: 'h-br1-exp', type: 'organicBranch', data: { kind: 'sub-exp', isNewStep: freshExp } });
+
+        // Evidence dots: real records cited by hypotheses 1 and 2, with their stored labels.
+        const evidence = new Map(d1.evidence.map((row) => [row.id, row]));
+        const dots = [
+          { id: 'h-ev-sl', hyp: 0, prefix: 'sl_', y: b1HubY - 76 },
+          { id: 'h-ev-wt', hyp: 1, prefix: 'wt_', y: b1HubY + 28 },
+        ];
+        dots.forEach((dot) => {
+          const rid = (h1[dot.hyp]?.claims[0]?.record_ids ?? []).find((id) => id.startsWith(dot.prefix));
+          if (!rid) return;
+          const row = evidence.get(rid);
+          n.push({
+            id: dot.id,
             type: 'evidenceDewdrop',
-            position: { x: twigX, y: b1HubY - 76 },
+            position: { x: twigX, y: dot.y },
             data: {
-              recordId: 'sl_0412',
-              summary: '5h 15m',
+              recordId: rid,
+              summary: row ? row.label.replace(/ (sleep|water)$/, '') : rid.startsWith('sl_') ? 'Sleep' : 'Water',
               animateIn: freshExp,
               onOpenRecord: (id: string) => onOpenRecord(id, 'raw'),
             },
-          },
-          {
-            id: 'h-ev-wt',
-            type: 'evidenceDewdrop',
-            position: { x: twigX, y: b1HubY + 28 },
-            data: {
-              recordId: 'wt_0210',
-              summary: '820 ml',
-              animateIn: freshExp,
-              onOpenRecord: (id: string) => onOpenRecord(id, 'raw'),
-            },
-          }
-        );
-        e.push(
-          { id: 'h-e-exp', source: 'h-br1-s1', target: 'h-br1-exp', type: 'organicBranch', data: { kind: 'sub-exp', isNewStep: freshExp } },
-          { id: 'h-e-ev1', source: 'h-br1-s1', target: 'h-ev-sl', type: 'organicBranch', data: { kind: 'evidence-tendril', isNewStep: freshExp } },
-          { id: 'h-e-ev2', source: 'h-br1-s2', target: 'h-ev-wt', type: 'organicBranch', data: { kind: 'evidence-tendril', isNewStep: freshExp } }
-        );
+          });
+          e.push({
+            id: `h-e-${dot.id}`,
+            source: `h-br1-s${dot.hyp + 1}`,
+            target: dot.id,
+            type: 'organicBranch',
+            data: { kind: 'evidence-tendril', isNewStep: freshExp },
+          });
+        });
       }
 
       // STEP: Branch 1 Resolved (Nov 22) — Melts into Verified Knowledge!
@@ -629,7 +672,7 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
             id: 'h-br1-melt',
             type: 'meltConfluence',
             position: { x: melt1X, y: b1HubY },
-            data: { label: '3 melted -> 1 truth', animateIn: freshSolve, onClick: () => onJumpToBranch('br_1') },
+            data: { label: `${h1.length} melted → 1 truth`, animateIn: freshSolve, onClick: () => onJumpToBranch('br_1') },
           },
           {
             id: 'h-br1-kn',
@@ -637,10 +680,10 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
             position: { x: melt1X + 245, y: b1HubY },
             data: {
               branchId: 'br_1',
-              statement: 'Lights out by 11:30 PM increased sleep to 7h 18m and cut headaches by 75%',
-              dateLabel: 'Nov 22',
-              confidence: 'High · 10d Exp',
-              recordIds: ['sl_0412', 'hd_0031'],
+              statement: kn1?.statement ?? br1.title,
+              dateLabel: shortDate(kn1?.date ?? br1.end_date ?? br1.start_date),
+              confidence: `${capitalize(kn1?.confidence ?? 'pending')}${exp1 ? ` · ${exp1.duration_days}d Exp` : ''}`,
+              recordIds: firstIds(h1[0], 2),
               isNew: freshSolve,
               animateIn: freshSolve,
               onSelectBranch: onJumpToBranch,
@@ -658,12 +701,13 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
     }
 
     return { nodes: n, edges: e };
-  }, [dateFrom, currentDate, currentStep, revealedIds, onJumpToBranch, onOpenRecord]);
+  }, [graph, data, insights, ALL_MILESTONES, dateFrom, currentDate, currentStep, revealedIds, onJumpToBranch, onOpenRecord]);
 
   // Smoothly pan/fit the camera as new branches grow on each Right Arrow press!
   useEffect(() => {
     const timer = setTimeout(() => {
-      fitView({ padding: 0.16, duration: 480 });
+      // Never zoom out so far that labels can't be read (same rule as the dashboard graph).
+      fitView({ padding: 0.08, minZoom: 0.55, duration: 480 });
     }, 60);
     return () => clearTimeout(timer);
   }, [safeStepIdx, dateFrom, dateTo, fitView]);
@@ -703,7 +747,7 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
             <span>From</span>
             <input
               type="date"
-              min="2026-08-25"
+              min={graph.range.start}
               max={dateTo}
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
@@ -717,7 +761,7 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
             <input
               type="date"
               min={dateFrom}
-              max="2026-11-22"
+              max={graph.range.end}
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
               className="px-2.5 py-1 rounded-lg font-mono text-[11px] text-t1 focus:outline-none"
@@ -728,9 +772,9 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
           {/* Quick Range Presets */}
           <div className="hidden xl:flex items-center gap-1.5 ml-1">
             {[
-              { lbl: 'Full 90d', from: '2026-08-25', to: '2026-11-22' },
-              { lbl: 'Oct–Nov', from: '2026-09-25', to: '2026-11-22' },
-              { lbl: 'Nov Only', from: '2026-11-01', to: '2026-11-22' },
+              { lbl: 'All data', from: graph.range.start, to: graph.range.end },
+              { lbl: 'Last 60d', from: isoMinusDays(graph.range.end, 59), to: graph.range.end },
+              { lbl: 'Last 21d', from: isoMinusDays(graph.range.end, 20), to: graph.range.end },
             ].map((p) => (
               <button
                 key={p.lbl}

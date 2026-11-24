@@ -10,7 +10,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Clock, FileSearch, GitBranch, Grid3X3, Mic, Plus, RotateCcw, Sparkles, Waves } from 'lucide-react';
-import type { BranchDetailResponse, GraphResponse } from '../../types';
+import type { BranchDetailResponse, BranchHypothesis, GraphResponse, InsightsResponse } from '../../types';
 import { alternatingY, dateToX, TRUNK_Y } from './graphMath';
 import {
   AnchorNode,
@@ -23,7 +23,7 @@ import {
   SubHypothesisNode,
 } from './CustomNodes';
 import { OrganicBranchEdge, TrunkEdge } from './CustomEdges';
-import { ElevenLabsBriefingDock } from '../ElevenLabsBriefingDock';
+import { ElevenLabsBriefingDock, type BriefingBeat } from '../ElevenLabsBriefingDock';
 import { SmoothZoomControls } from './SmoothZoomControls';
 
 const nodeTypes = {
@@ -42,8 +42,94 @@ const edgeTypes = {
   organicBranch: OrganicBranchEdge,
 };
 
+// Labels on the graph are built from the API data; these only format it.
+const shortDate = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const daysBetween = (fromIso: string, toIso: string) =>
+  Math.round((Date.parse(`${toIso}T00:00:00Z`) - Date.parse(`${fromIso}T00:00:00Z`)) / 86_400_000);
+// "11 of 13 short nights came after ..." -> "11 of 13 short nights"
+const claimCount = (hyp?: BranchHypothesis) => {
+  const text = hyp?.claims[0]?.text;
+  if (!text) return 'Not enough data yet';
+  const m = text.match(/^(\d+ of \d+ \S+ \S+)/);
+  return m ? m[1] : text;
+};
+const firstClaimIds = (hyp: BranchHypothesis | undefined, count: number) =>
+  (hyp?.claims[0]?.record_ids ?? []).slice(0, count);
+const METRIC_WORD: Record<string, string> = { sl: 'Sleep', hd: 'Headache', wt: 'Water', sc: 'Screen', cf: 'Caffeine' };
+
+// Default zoom: fit the whole graph, but never so far out that labels can't be read on a
+// projector. The trunk's far ends may sit just off screen; pan or zoom out to see them.
+const MIN_READABLE_ZOOM = 0.66;
+const MIN_READABLE_ZOOM_WITH_PANEL = 0.55;
+
+// The guided audio brief: four short lines built only from API numbers (rule 9).
+const buildBriefing = (
+  graph: GraphResponse,
+  details: Record<string, BranchDetailResponse>,
+  insights: InsightsResponse | null
+): BriefingBeat[] => {
+  const beats: Omit<BriefingBeat, 'label'>[] = [];
+  const shift = insights?.sleep_shift;
+  if (shift) {
+    beats.push({
+      id: 'beat-change',
+      text: `Your sleep normal was ${spokenMinutes(shift.before_median_min)} until ${longDate(shift.date)}, when Python detected a ${Math.abs(
+        shift.delta_min
+      )} minute drop.`,
+      recordIds: shift.record_ids.slice(0, 2),
+      highlightNodes: [`ce-${shift.change_event_id}`],
+    });
+  }
+  const openBranch = graph.branches.find((b) => b.status === 'open');
+  const top = openBranch ? details[openBranch.id]?.hypotheses[0] : undefined;
+  if (openBranch && top?.claims[0]) {
+    beats.push({
+      id: 'beat-cause',
+      text: `For "${openBranch.title}", the strongest pattern is ${(top.label ?? '').toLowerCase()}: ${top.claims[0].text}.`,
+      recordIds: top.claims[0].record_ids.slice(0, 2),
+      highlightNodes: [`br1-hub`, 'br1-sub-1', 'ev-dew-sl1'],
+    });
+  }
+  const exp = insights?.experiment;
+  if (exp) {
+    const lastNight = [...exp.nights].reverse().find((night) => night.record_id);
+    beats.push({
+      id: 'beat-experiment',
+      text: `Your locked experiment, ${exp.description.toLowerCase()}, is at ${exp.adherence_pct} percent adherence after ${
+        exp.days_elapsed
+      } of ${exp.duration_days} nights. ${exp.nights_met} of ${exp.nights_logged} nights met the target so far.`,
+      recordIds: lastNight?.record_id ? [lastNight.record_id] : [],
+      highlightNodes: ['br1-exp-1'],
+    });
+  }
+  const latest = graph.knowledge[graph.knowledge.length - 1];
+  if (latest) {
+    const solved = graph.branches.find((b) => b.status === 'concluded' && b.end_date === latest.date);
+    beats.push({
+      id: 'beat-knowledge',
+      text: `${graph.knowledge.length === 1 ? 'One investigation has' : `${graph.knowledge.length} investigations have`} become verified knowledge. Latest: ${latest.statement}.`,
+      recordIds: solved ? firstClaimIds(details[solved.id]?.hypotheses[0], 2) : [],
+      highlightNodes: [solved?.id === 'br_1' ? 'br1-knowledge' : 'br0-knowledge'],
+    });
+  }
+  return beats.map((b, i) => ({ ...b, label: `${i + 1} / ${beats.length} · ${BEAT_TITLES[b.id]}` }));
+};
+
+const BEAT_TITLES: Record<string, string> = {
+  'beat-change': 'Change Detected',
+  'beat-cause': 'Top Verified Pattern',
+  'beat-experiment': 'Locked Experiment',
+  'beat-knowledge': 'Verified Knowledge',
+};
+const spokenMinutes = (min: number) => `${Math.floor(min / 60)} hours ${Math.round(min % 60)} minutes`;
+const longDate = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
+
 interface GraphCanvasProps {
   graph: GraphResponse;
+  insights: InsightsResponse | null;
   branchDetailsMap: Record<string, BranchDetailResponse>;
   selectedBranchId: string | null;
   isRightPanelOpen: boolean;
@@ -56,6 +142,7 @@ interface GraphCanvasProps {
 
 const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
   graph,
+  insights,
   branchDetailsMap,
   selectedBranchId,
   isRightPanelOpen,
@@ -65,7 +152,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
   onAdvanceDemo,
   onOpenNewBranch,
 }) => {
-  const { fitView } = useReactFlow();
+  const { fitView, getNodes } = useReactFlow();
   const [showEvidenceNodes, setShowEvidenceNodes] = useState(true);
   const [showSharedMycelium, setShowSharedMycelium] = useState(true);
   const [animateSap, setAnimateSap] = useState(true);
@@ -75,7 +162,18 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      fitView({ padding: 0.11, duration: 380 });
+      // Frame the branches and their nodes, not the trunk's far ends, so a new knowledge node
+      // at the right edge is never cut off.
+      // (Branch start points stay in, since they sit left of each branch title.)
+      const content = getNodes()
+        .filter((node) => node.id !== 'trunk-start' && node.id !== 'trunk-end')
+        .map((node) => ({ id: node.id }));
+      fitView({
+        nodes: content.length ? content : undefined,
+        padding: 0.06,
+        minZoom: isRightPanelOpen ? MIN_READABLE_ZOOM_WITH_PANEL : MIN_READABLE_ZOOM,
+        duration: 380,
+      });
     }, 90);
     return () => clearTimeout(timer);
   }, [isRightPanelOpen, graph, showEvidenceNodes, fitView]);
@@ -94,13 +192,25 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
       { id: 'trunk-end', type: 'anchor', position: { x: trunkEndX, y: TRUNK_Y }, data: {} }
     );
 
-    const dateTicks = [
-      { date: '2026-09-10', label: 'Sep 10' },
-      { date: '2026-10-01', label: 'Oct 1' },
-      { date: '2026-10-22', label: 'Oct 22' },
-      { date: '2026-11-03', label: 'Nov 3' },
-      { date: '2026-11-22', label: 'Nov 22' },
-    ].map((t) => ({ x: dateToX(rangeStart, t.date), label: t.label }));
+    // Ticks at the dates that matter (first day, branch starts, change events, conclusions,
+    // today), skipping any closer than 7 days to the previous one so labels never overlap.
+    const tickDates = [
+      graph.range.start,
+      ...graph.branches.map((b) => b.start_date),
+      ...graph.change_events.map((ce) => ce.date),
+      ...graph.knowledge.map((k) => k.date),
+      graph.range.end,
+    ]
+      .filter((d, i, all) => all.indexOf(d) === i)
+      .sort();
+    const dateTicks: { x: number; label: string }[] = [];
+    let lastTick = '';
+    for (const d of tickDates) {
+      if (lastTick && daysBetween(lastTick, d) < 7 && d !== graph.range.end) continue;
+      if (lastTick && daysBetween(lastTick, d) < 7) dateTicks.pop(); // keep "today" over a close neighbour
+      dateTicks.push({ x: dateToX(rangeStart, d), label: shortDate(d) });
+      lastTick = d;
+    }
     dateTicks.push({ x: 1740, label: 'Future Growth' });
 
     e.push({
@@ -135,8 +245,11 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
     // 3. BRANCH 0 (SOLVED — UPPER SIDE OF TRUNK)
     // 3 sub-branches melt into 1 stem -> ends in sleek Verified Knowledge node (never mixes back to trunk)
     const br0 = graph.branches.find((b) => b.id === 'br_0');
+    const br0Detail = branchDetailsMap['br_0'];
     const kn1 = graph.knowledge.find((k) => k.id === 'kn_1');
-    if (br0 && kn1) {
+    if (br0 && kn1 && br0Detail) {
+      const br0Hyps = br0Detail.hypotheses.slice(0, 3);
+      const br0Exp = br0Detail.experiment;
       const b0StartX = 240;
       const b0HubX = 415;
       const b0HubY = alternatingY(-1, 1);
@@ -149,10 +262,10 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
           position: { x: b0HubX, y: b0HubY },
           data: {
             id: 'br_0',
-            title: 'Caffeine after 4 PM & sleep?',
-            status: 'concluded',
+            title: br0.title,
+            status: br0.status,
             labelSide: 'below',
-            subtitle: 'Solved Oct 22 · 3 sub-branches melted',
+            subtitle: `Solved ${shortDate(br0.end_date ?? kn1.date)} · ${br0Hyps.length} sub-branches melted`,
             isSelected: selectedBranchId === 'br_0',
             spotlight: isLit('br0-hub'),
             onSelect: onSelectBranch,
@@ -172,56 +285,36 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
       const melt0X = sub0X + 215;
       const melt0Y = b0HubY;
 
+      // Sub-branches, confidences and claim counts all come from GET /api/branches/br_0.
+      const br0Offsets = [-105, 0, 100];
+      br0Hyps.forEach((hyp, idx) => {
+        n.push({
+          id: `br0-sub-${idx + 1}`,
+          type: 'subHypothesis',
+          position: { x: sub0X, y: b0HubY + br0Offsets[idx] },
+          data: {
+            rank: hyp.rank,
+            label: hyp.label ?? hyp.text ?? 'Hypothesis',
+            confidence: hyp.confidence ?? 0,
+            detail:
+              idx === 0 && br0Exp
+                ? `${capitalize(br0Exp.status.replace('_', ' '))} · ${claimCount(hyp)}`
+                : claimCount(hyp),
+            tone: idx === 0 ? 'solved' : 'muted',
+            compact: true,
+            spotlight: idx === 0 ? isLit('br0-sub-1') : false,
+            onClick: () => onSelectBranch('br_0'),
+          },
+        });
+      });
+
       n.push(
-        {
-          id: 'br0-sub-1',
-          type: 'subHypothesis',
-          position: { x: sub0X, y: b0HubY - 105 },
-          data: {
-            rank: 1,
-            label: 'Late caffeine',
-            confidence: 84,
-            detail: 'Supported · -31m sleep',
-            tone: 'solved',
-            compact: true,
-            spotlight: isLit('br0-sub-1'),
-            onClick: () => onSelectBranch('br_0'),
-          },
-        },
-        {
-          id: 'br0-sub-2',
-          type: 'subHypothesis',
-          position: { x: sub0X, y: b0HubY },
-          data: {
-            rank: 2,
-            label: 'Dinner timing',
-            confidence: 18,
-            detail: 'Refuted · no shift',
-            tone: 'muted',
-            compact: true,
-            onClick: () => onSelectBranch('br_0'),
-          },
-        },
-        {
-          id: 'br0-sub-3',
-          type: 'subHypothesis',
-          position: { x: sub0X, y: b0HubY + 100 },
-          data: {
-            rank: 3,
-            label: 'Late workout',
-            confidence: 12,
-            detail: 'Refuted · weak link',
-            tone: 'muted',
-            compact: true,
-            onClick: () => onSelectBranch('br_0'),
-          },
-        },
         {
           id: 'br0-melt',
           type: 'meltConfluence',
           position: { x: melt0X, y: melt0Y },
           data: {
-            label: '3 melted -> 1 truth',
+            label: `${br0Hyps.length} melted → 1 truth`,
             onClick: () => onSelectBranch('br_0'),
           },
         },
@@ -232,9 +325,9 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
           data: {
             branchId: 'br_0',
             statement: kn1.statement,
-            dateLabel: 'Oct 22',
-            confidence: 'Medium · 14d Exp',
-            recordIds: ['sl_0412', 'sl_0413'],
+            dateLabel: shortDate(kn1.date),
+            confidence: `${capitalize(kn1.confidence)}${br0Exp ? ` · ${br0Exp.duration_days}d Exp` : ''}`,
+            recordIds: firstClaimIds(br0Hyps[0], 2),
             spotlight: isLit('br0-knowledge'),
             onSelectBranch,
             onOpenRecord: (rid: string) => onOpenRecord(rid, 'raw'),
@@ -274,8 +367,8 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
             status: br1.status,
             labelSide: 'below',
             subtitle: b1Solved
-              ? 'Solved · 3 sub-branches melted into Knowledge'
-              : 'Open · 12 days · 3 sub-branches · 6 twigs',
+              ? `Solved · ${br1Detail.hypotheses.length} sub-branches melted into Knowledge`
+              : `Open · ${daysBetween(br1.start_date, graph.range.end) + 1} days · ${br1Detail.hypotheses.length} sub-branches`,
             isSelected: selectedBranchId === 'br_1',
             spotlight: isLit('br1-hub'),
             onSelect: onSelectBranch,
@@ -304,12 +397,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
         const hid = `br1-sub-${hyp.rank}`;
         const hy = b1HubY + subOffsets[idx];
         const firstRec = hyp.claims[0]?.record_ids[0];
-        const detailText =
-          idx === 0
-            ? `4/5 days <6h · ${firstRec ?? 'sl_0412'}`
-            : idx === 1
-            ? `3/5 days <1 L · ${firstRec ?? 'wt_0210'}`
-            : 'Weak · upstream signal';
+        const detailText = firstRec ? `${claimCount(hyp)} · ${firstRec}` : claimCount(hyp);
 
         n.push({
           id: hid,
@@ -346,7 +434,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
             type: 'meltConfluence',
             position: { x: melt1X, y: melt1Y },
             data: {
-              label: '3 melted -> 1 truth',
+              label: `${br1Detail.hypotheses.length} melted → 1 truth`,
               onClick: () => onSelectBranch('br_1'),
             },
           },
@@ -356,12 +444,12 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
             position: { x: melt1X + 245, y: melt1Y },
             data: {
               branchId: 'br_1',
-              statement:
-                kn2?.statement ??
-                'Lights out by 11:30 PM increased sleep to 7h 18m and cut headaches by 75%',
-              dateLabel: 'Nov 22',
-              confidence: 'High · 10d Exp',
-              recordIds: ['sl_0412', 'hd_0031'],
+              statement: kn2?.statement ?? `${br1.title} Concluded by a locked experiment.`,
+              dateLabel: shortDate(kn2?.date ?? br1.end_date ?? graph.range.end),
+              confidence: `${capitalize(kn2?.confidence ?? 'pending')}${
+                br1Detail.experiment ? ` · ${br1Detail.experiment.duration_days}d Exp` : ''
+              }`,
+              recordIds: firstClaimIds(br1Detail.hypotheses[0], 2),
               isNew: true,
               spotlight: isLit('br1-knowledge'),
               onSelectBranch,
@@ -384,7 +472,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
             type: 'experimentLeaf',
             position: { x: twigX + 20, y: b1HubY - 155 },
             data: {
-              description: 'Lights out 11:30 PM (10d)',
+              description: `${br1Detail.experiment.description} (${br1Detail.experiment.duration_days}d)`,
               adherence: br1Detail.experiment.adherence_pct,
               locked: br1Detail.experiment.locked,
               spotlight: isLit('br1-exp-1'),
@@ -400,68 +488,68 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
           });
         }
 
-        n.push(
-          {
-            id: 'br1-exp-2',
+        // Proposed (not yet locked) tests for hypotheses 2 and 3, as stored in the database.
+        const proposals = [
+          { idx: 1, y: b1HubY + 6, kind: 'sub-cyan' as const },
+          { idx: 2, y: b1HubY + 132, kind: 'sub-muted' as const },
+        ];
+        proposals.forEach(({ idx, y, kind }) => {
+          const hyp = br1Detail.hypotheses[idx];
+          if (!hyp?.test) return;
+          n.push({
+            id: `br1-exp-${idx + 1}`,
             type: 'experimentLeaf',
-            position: { x: twigX + 20, y: b1HubY + 6 },
+            position: { x: twigX + 20, y },
             data: {
-              description: 'Drink 2 L water daily (10d)',
+              // The stored text usually says "for 10 days" already; only add the length if not.
+              description: hyp.test_days && !/\bdays?\b/.test(hyp.test) ? `${hyp.test} (${hyp.test_days}d)` : hyp.test,
               adherence: 0,
               locked: false,
               isDraft: true,
               onClick: () => onSelectBranch('br_1'),
             },
-          },
-          {
-            id: 'br1-exp-3',
-            type: 'experimentLeaf',
-            position: { x: twigX + 20, y: b1HubY + 132 },
-            data: {
-              description: 'No screens after 10 PM (7d)',
-              adherence: 0,
-              locked: false,
-              isDraft: true,
-              onClick: () => onSelectBranch('br_1'),
-            },
-          }
-        );
-        e.push(
-          { id: 'e-br1-exp-2', source: 'br1-sub-2', target: 'br1-exp-2', type: 'organicBranch', data: { kind: 'sub-cyan', animateFlow: false } },
-          { id: 'e-br1-exp-3', source: 'br1-sub-3', target: 'br1-exp-3', type: 'organicBranch', data: { kind: 'sub-muted', animateFlow: false } }
-        );
+          });
+          e.push({
+            id: `e-br1-exp-${idx + 1}`,
+            source: `br1-sub-${hyp.rank}`,
+            target: `br1-exp-${idx + 1}`,
+            type: 'organicBranch',
+            data: { kind, animateFlow: false },
+          });
+        });
 
+        // Evidence dots: real records cited by hypotheses 1 and 2, with their stored labels.
         if (showEvidenceNodes) {
-          n.push(
-            {
-              id: 'ev-dew-sl1',
+          const evidenceById = new Map(br1Detail.evidence.map((row) => [row.id, row]));
+          const cited = (hypIdx: number, prefix: string) =>
+            (br1Detail.hypotheses[hypIdx]?.claims[0]?.record_ids ?? []).find((id) => id.startsWith(prefix));
+          const dots = [
+            { id: 'ev-dew-sl1', hyp: 0, rec: cited(0, 'sl_'), y: b1HubY - 94 },
+            { id: 'ev-dew-sl2', hyp: 0, rec: cited(0, 'hd_'), y: b1HubY - 52 },
+            { id: 'ev-dew-wt', hyp: 1, rec: cited(1, 'wt_'), y: b1HubY + 64 },
+          ];
+          dots.forEach((dot) => {
+            if (!dot.rec) return;
+            const row = evidenceById.get(dot.rec);
+            n.push({
+              id: dot.id,
               type: 'evidenceDewdrop',
-              position: { x: twigX, y: b1HubY - 94 },
+              position: { x: twigX, y: dot.y },
               data: {
-                recordId: 'sl_0412',
-                summary: '5h 15m',
-                spotlight: isLit('ev-dew-sl1'),
+                recordId: dot.rec,
+                summary: row ? row.label.replace(/ (sleep|water)$/, '') : METRIC_WORD[dot.rec.slice(0, 2)] ?? 'Record',
+                spotlight: isLit(dot.id),
                 onOpenRecord: (id: string) => onOpenRecord(id, 'raw'),
               },
-            },
-            {
-              id: 'ev-dew-sl2',
-              type: 'evidenceDewdrop',
-              position: { x: twigX, y: b1HubY - 52 },
-              data: { recordId: 'hd_0031', summary: 'Headache', onOpenRecord: (id: string) => onOpenRecord(id, 'raw') },
-            },
-            {
-              id: 'ev-dew-wt',
-              type: 'evidenceDewdrop',
-              position: { x: twigX, y: b1HubY + 64 },
-              data: { recordId: 'wt_0210', summary: '820 ml', onOpenRecord: (id: string) => onOpenRecord(id, 'raw') },
-            }
-          );
-          e.push(
-            { id: 'e-dew-sl1', source: 'br1-sub-1', target: 'ev-dew-sl1', type: 'organicBranch', data: { kind: 'evidence-tendril' } },
-            { id: 'e-dew-sl2', source: 'br1-sub-1', target: 'ev-dew-sl2', type: 'organicBranch', data: { kind: 'evidence-tendril' } },
-            { id: 'e-dew-wt', source: 'br1-sub-2', target: 'ev-dew-wt', type: 'organicBranch', data: { kind: 'evidence-tendril' } }
-          );
+            });
+            e.push({
+              id: `e-dew-${dot.id}`,
+              source: `br1-sub-${br1Detail.hypotheses[dot.hyp].rank}`,
+              target: dot.id,
+              type: 'organicBranch',
+              data: { kind: 'evidence-tendril' },
+            });
+          });
         }
       }
 
@@ -556,6 +644,11 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
     onOpenRecord,
   ]);
 
+  const briefing = useMemo(
+    () => buildBriefing(graph, branchDetailsMap, insights),
+    [graph, branchDetailsMap, insights]
+  );
+
   return (
     <div ref={flowContainerRef} className="relative w-full h-full overflow-hidden">
       <div
@@ -641,7 +734,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
         edgeTypes={edgeTypes}
         nodeOrigin={[0.5, 0.5]}
         fitView
-        fitViewOptions={{ padding: 0.11 }}
+        fitViewOptions={{ padding: 0.05, minZoom: MIN_READABLE_ZOOM }}
         minZoom={0.28}
         maxZoom={1.85}
         zoomOnScroll={false}
@@ -688,6 +781,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
         </div>
 
         <ElevenLabsBriefingDock
+          beats={briefing}
           onHighlightNodes={setSpotlightIds}
           onOpenRecord={onOpenRecord}
         />

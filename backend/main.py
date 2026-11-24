@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.auth import auth_router, get_current_user, init_auth_db
-from backend.routes import branches, experiments, graph
+from backend.routes import branches, experiments, graph, insights
 
 # Exact origins only: cookies are sent with allow_credentials, so never '*'.
 FRONTEND_ORIGINS = list(dict.fromkeys(
@@ -44,6 +44,7 @@ signed_in = [Depends(get_current_user)]
 app.include_router(graph.router, dependencies=signed_in)
 app.include_router(branches.router, dependencies=signed_in)
 app.include_router(experiments.router, dependencies=signed_in)
+app.include_router(insights.router, dependencies=signed_in)
 
 
 @app.get("/")

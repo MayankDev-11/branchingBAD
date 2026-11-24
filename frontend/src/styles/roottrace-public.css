@@ -18,7 +18,9 @@
   color: var(--rl-ink-primary);
   font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
   min-height: 100vh;
-  overflow-x: hidden;
+  /* clip, not hidden: hidden turns this div into a scroll box, which stops the
+     sticky navbar (and its scroll progress bar) from staying at the top. */
+  overflow-x: clip;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -101,6 +103,31 @@
 .rl-scope .rl-dot-grid {
   background-image: radial-gradient(rgba(21, 24, 23, 0.11) 1px, transparent 1px);
   background-size: 22px 22px;
+}
+
+/* Navbar section links: grey at rest, dark with an underline on hover, so they read as links. */
+.rl-scope .rl-nav-link {
+  color: var(--rl-ink-secondary);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 6px;
+  text-decoration-thickness: 1.5px;
+  transition: color 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    text-decoration-color 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.rl-scope .rl-nav-link:hover {
+  color: var(--rl-ink-primary);
+  text-decoration-color: var(--rl-accent-primary);
+}
+
+/* Sideways-scrolling rows (the phone section links) scroll by swipe without a visible bar. */
+.rl-scope .rl-no-scrollbar {
+  scrollbar-width: none;
+}
+
+.rl-scope .rl-no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 .rl-scope .rl-transition {
