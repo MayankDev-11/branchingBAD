@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
@@ -45,12 +45,113 @@ const LINEAGE_CHAIN = [
   },
 ];
 
+const NAV_ITEMS = [
+  { href: '#evidence-graph', label: 'Evidence Graph' },
+  { href: '#architecture', label: 'Memory Architecture' },
+  { href: '#lineage', label: 'Lineage' },
+  { href: '#local-first', label: 'Local-First' },
+];
+
+const prefersReducedMotion = () =>
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const NAVBAR_HEIGHT = 64;
+const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+let cancelGlide: (() => void) | null = null;
+
+// Glide the window to `top` with our own animation, so it looks the same in every browser.
+// Longer trips take a little longer (450–900 ms). Turning the wheel or touching the screen stops it.
+const glideTo = (top: number) => {
+  cancelGlide?.();
+  const start = window.scrollY;
+  const distance = top - start;
+  if (Math.abs(distance) < 2) return;
+  const duration = Math.min(900, Math.max(450, Math.abs(distance) * 0.45));
+  const startTime = performance.now();
+  let frame = 0;
+
+  const stop = () => {
+    window.cancelAnimationFrame(frame);
+    window.removeEventListener('wheel', stop);
+    window.removeEventListener('touchstart', stop);
+    window.removeEventListener('keydown', stop);
+    cancelGlide = null;
+  };
+  const step = (now: number) => {
+    const progress = Math.min(1, (now - startTime) / duration);
+    window.scrollTo(0, start + distance * easeInOutCubic(progress));
+    if (progress < 1) frame = window.requestAnimationFrame(step);
+    else stop();
+  };
+
+  window.addEventListener('wheel', stop, { passive: true });
+  window.addEventListener('touchstart', stop, { passive: true });
+  window.addEventListener('keydown', stop);
+  cancelGlide = stop;
+  frame = window.requestAnimationFrame(step);
+};
+
+// Nav links glide to their section instead of jumping, and the section heading lands just
+// below the sticky navbar. People who turned on "reduce motion" still get an instant jump.
+const scrollToSection = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+  const target = document.querySelector<HTMLElement>(href);
+  if (!target) return;
+  event.preventDefault();
+  window.history.replaceState(null, '', href);
+
+  const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+  const top = Math.min(
+    maxScroll,
+    Math.max(0, target.getBoundingClientRect().top + window.scrollY - NAVBAR_HEIGHT),
+  );
+  if (prefersReducedMotion()) window.scrollTo(0, top);
+  else glideTo(top);
+};
+
+// Fills the thin bar under the navbar as the page is scrolled (0% at the top, 100% at the bottom).
+// Writes the transform directly so scrolling never re-renders the page.
+const useScrollProgress = () => {
+  const barRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      const ratio = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+      if (barRef.current) barRef.current.style.transform = `scaleX(${ratio})`;
+    };
+    const schedule = () => {
+      if (!frame) frame = window.requestAnimationFrame(update);
+    };
+
+    update();
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    // The page grows when the lineage panel opens, which changes the ratio without a scroll event.
+    const resizeObserver = new ResizeObserver(schedule);
+    resizeObserver.observe(document.body);
+
+    return () => {
+      window.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+      resizeObserver.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  return barRef;
+};
+
 export const LandingPage: React.FC = () => {
   const { user, loginDemo, logout } = useAuth();
   const navigate = useNavigate();
   const [lineageOpen, setLineageOpen] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
   const [demoError, setDemoError] = useState<string | null>(null);
+  const progressRef = useScrollProgress();
+  // Stop a glide still running if the user leaves the page mid-scroll (e.g. clicks Sign In).
+  useEffect(() => () => cancelGlide?.(), []);
 
   const handleJudgeDemo = async () => {
     setDemoError(null);
@@ -92,15 +193,11 @@ export const LandingPage: React.FC = () => {
           </Link>
 
           <nav aria-label="Primary sections" className="hidden md:flex items-center gap-7 text-[13.5px]">
-            {[
-              { href: '#evidence-graph', label: 'Evidence Graph' },
-              { href: '#architecture', label: 'Memory Architecture' },
-              { href: '#lineage', label: 'Lineage' },
-              { href: '#local-first', label: 'Local-First' },
-            ].map((item) => (
+            {NAV_ITEMS.map((item) => (
               <a
                 key={item.href}
                 href={item.href}
+                onClick={(event) => scrollToSection(event, item.href)}
                 className="rl-transition hover:opacity-100"
                 style={{ color: 'var(--rl-ink-secondary)' }}
               >
@@ -145,11 +242,20 @@ export const LandingPage: React.FC = () => {
             )}
           </div>
         </div>
+
+        {/* Scroll progress: fills left to right over the navbar's bottom border */}
+        <div aria-hidden="true" className="absolute left-0 right-0 -bottom-px h-[2px] pointer-events-none">
+          <div
+            ref={progressRef}
+            className="h-full origin-left"
+            style={{ backgroundColor: 'var(--rl-accent-primary)', transform: 'scaleX(0)' }}
+          />
+        </div>
       </header>
 
       <main className="flex-1">
         {/* 2. ASYMMETRIC HERO SECTION */}
-        <section id="evidence-graph" className="max-w-6xl mx-auto px-4 sm:px-6 pt-12 pb-16 lg:pt-20 lg:pb-24">
+        <section id="evidence-graph" className="scroll-mt-16 max-w-6xl mx-auto px-4 sm:px-6 pt-12 pb-16 lg:pt-20 lg:pb-24">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-start">
             {/* Left Editorial Column (5 cols) */}
             <div className="lg:col-span-5 space-y-6">
@@ -248,7 +354,7 @@ export const LandingPage: React.FC = () => {
         {/* 3. THREE-TIER MEMORY ARCHITECTURE */}
         <section
           id="architecture"
-          className="border-t py-16 lg:py-20"
+          className="scroll-mt-16 border-t py-16 lg:py-20"
           style={{ borderColor: 'var(--rl-border-hairline)', backgroundColor: 'var(--rl-bg-surface)' }}
         >
           <div className="max-w-6xl mx-auto px-4 sm:px-6 space-y-10">
@@ -328,7 +434,7 @@ export const LandingPage: React.FC = () => {
         </section>
 
         {/* 4. INTERACTIVE EVIDENCE LINEAGE CARD */}
-        <section id="lineage" className="max-w-6xl mx-auto px-4 sm:px-6 py-16 lg:py-20">
+        <section id="lineage" className="scroll-mt-16 max-w-6xl mx-auto px-4 sm:px-6 py-16 lg:py-20">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             <div className="lg:col-span-4 space-y-3">
               <div className="rl-mono text-[11px] uppercase tracking-[0.14em]" style={{ color: 'var(--rl-accent-signal)' }}>
@@ -440,7 +546,7 @@ export const LandingPage: React.FC = () => {
         {/* 5. LOCAL-FIRST COMPARISON STRIP */}
         <section
           id="local-first"
-          className="border-t py-16 lg:py-20"
+          className="scroll-mt-16 border-t py-16 lg:py-20"
           style={{ borderColor: 'var(--rl-border-hairline)', backgroundColor: 'var(--rl-bg-surface)' }}
         >
           <div className="max-w-6xl mx-auto px-4 sm:px-6 space-y-8">

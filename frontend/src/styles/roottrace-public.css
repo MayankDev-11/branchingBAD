@@ -18,7 +18,9 @@
   color: var(--rl-ink-primary);
   font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
   min-height: 100vh;
-  overflow-x: hidden;
+  /* clip, not hidden: hidden turns this div into a scroll box, which stops the
+     sticky navbar (and its scroll progress bar) from staying at the top. */
+  overflow-x: clip;
   -webkit-font-smoothing: antialiased;
 }
 
