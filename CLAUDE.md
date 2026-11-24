@@ -1,23 +1,18 @@
-# RootTrace — Shared Project Context & API Contract
+@CONTEXT.md
 
-## Product Summary
-RootTrace turns wearable and phone health logs into honest, falsifiable self-experiments with an evidence-constrained AI layer.
-- **Core Rule:** Python computes baselines, change points, and experiment outcomes. Claude Haiku 4.5 on Amazon Bedrock (`ap-south-1`, Mumbai) explains results and drafts 2–3 ranked hypotheses using 6 read-only tools. Python validates every cited record ID before rendering; uncited claims are dropped.
-- **Privacy Pitch:** Your raw data never goes to the AI. Personal details are scrubbed locally via Presidio before Bedrock, Bedrock Guardrails run in Mask mode, and users can inspect "What the AI saw" beside every answer.
+## For Claude Code (Parikshit: data, analysis and the main API routes)
 
-## Folder Ownership (Never Edit Another Person's Folder)
-- **Satwik (`frontend/`):** React + Vite + TypeScript + `@xyflow/react` + Tailwind + Framer Motion + `lucide-react`.
-- **Parikshit (`backend/app/data/`, `backend/app/analysis/`, `backend/app/routes/`):** SQLite (9 tables + `lock_criterion` trigger), 90-day demo dataset (`seed=42`), pandas baselines, `ruptures` PELT change detection, FastAPI routes.
-- **Mayank (`backend/app/ai/`, `backend/app/privacy/`, `backend/app/integrations/`):** Bedrock Converse loop (`in.anthropic.claude-haiku-4-5-20251001-v1:0`), `submit_answer` tool schema, Presidio PII scrubbing, red-flag keyword gate, citation validator, ElevenLabs TTS, Obsidian export.
-- **Presenter (`docs/`):** PPT, video, pitch script, Q&A prep.
+- Read `contracts/api.md` and every `contracts/sample_*.json` before changing a route. Responses must match those shapes exactly; the frontend depends on them.
+- Stay in the data, analysis and route code. Don't edit `frontend/`, or Mayank's AI, privacy and integration code; ask instead.
+- Use SQLite with plain `sqlite3` and pandas for analysis. Put the schema in a `.sql` file with the triggers that enforce rules 5 and 6.
+- Run the tests after every change and add tests for change detection, the lock trigger and experiment evaluation.
+- Show a plan before writing code, and work on a branch, not `main`.
 
-## API Contract (`http://localhost:8000`, CORS allow `http://localhost:5173`)
-1. `GET /api/graph` — Trunk series, change events, branches (`open|concluded|inconclusive`), merged knowledge nodes.
-2. `GET /api/branches/{id}` — Full branch detail: question, triggering change event, ranked hypotheses, locked experiment, evidence list.
-3. `GET /api/records/{id}` — Raw record provenance: value, unit, date, time, device, source_id, source_file, data_quality, normalization.
-4. `POST /api/experiments/{id}/lock` — Locks `success_criterion` via SQLite trigger; returns updated experiment.
-5. `POST /api/demo/advance` — Body `{"days": 10}` → fast-forwards demo clock and returns updated graph payload.
-6. `POST /api/ask` — Body `{"branch_id": "br_1" | null, "question": "..."}` → returns `red_flag`, `hypotheses`, `dropped_claims`, `sent_to_ai`.
-7. `GET /api/report/weekly` — Returns 5-line cited report + cached ElevenLabs `audio_url`.
+### Next tasks, in order
 
-See `contracts/api.md` and `contracts/sample_*.json` for exact JSON shapes.
+1. Make `GET /api/graph` return the contract shape (`range`, `trunk`, `change_events`, `branches`, `knowledge`), and add `CORSMiddleware` for `http://localhost:5173`.
+2. SQLite schema (9 tables) with the lock trigger and an "observations are immutable" trigger, plus tests.
+3. A 90-day demo generator (fixed seed) that tells the demo story in `CONTEXT.md`, writing into SQLite.
+4. `GET /api/branches/{id}` and `GET /api/records/{id}` from the database.
+5. Baselines (30-day rolling median and MAD), change detection (5 of 7 days beyond 2 MADs, `ruptures` PELT for the start date, 14-day cooldown), and the pattern finder that returns counts with record IDs.
+6. `POST /api/experiments/{id}/lock`, `POST /api/demo/advance`, and experiment evaluation (supported / not supported / insufficient data under 70% adherence or fewer than 7 days).
