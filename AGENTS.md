@@ -13,6 +13,14 @@ Read `CONTEXT.md` first. It holds the product summary, the rules, folder ownersh
 - Tests must mock Bedrock and ElevenLabs. Read keys from `.env`; never hard-code or print them.
 - Show a plan before writing code, and work on a branch, not `main`.
 
+## For Claude Code (Parikshit: data, analysis, main API routes)
+
+- Claude Code also loads `CLAUDE.md`, which imports `CONTEXT.md` and holds Parikshit's ordered task list. Follow it.
+- Before any work: `git checkout main`, `git pull`, then work on your own branch (`data`), never directly on `main`.
+- Stay in the data, analysis and route code. Don't edit `frontend/` or Mayank's AI, privacy and integration code; ask instead.
+- Responses must match `contracts/sample_*.json` exactly. Run the tests after every change.
+- Commit after each working step and push the branch; merge into `main` through a pull request.
+
 ## For Antigravity (Satwik: frontend)
 
 - Stay in `frontend/`. Keep `src/contracts/` identical to `contracts/`. Load data only through `src/api.ts`.
