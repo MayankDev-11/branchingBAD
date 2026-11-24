@@ -8,11 +8,13 @@
 - Run the tests after every change and add tests for change detection, the lock trigger and experiment evaluation.
 - Show a plan before writing code, and work on a branch, not `main`.
 
+### Status (24 Nov): tasks 1-6 done on branch `data`
+
+Layout (kept in `backend/`, not `backend/app/`): `backend/data/` (schema.sql, generate_demo.py, store.py, queries.py, metrics.py), `backend/analysis/` (baselines, change_detection, patterns, experiments, state), `backend/routes/` (graph, branches, experiments). The demo DB is rebuilt from seed 42 on first request; the demo clock starts on 2026-11-20. Windows: build `.venv` with Python 3.12 (ruptures has no 3.14 wheel).
+
+Functions for Mayank's six AI tools: `queries.build_branch` (get_branch), `patterns.summarize_metric`, `patterns.compare_periods`, `patterns.find_patterns` (via `state.branch_patterns`), `baselines.get_baseline`, `queries.get_records`.
+
 ### Next tasks, in order
 
-1. Make `GET /api/graph` return the contract shape (`range`, `trunk`, `change_events`, `branches`, `knowledge`), and add `CORSMiddleware` for `http://localhost:5173`.
-2. SQLite schema (9 tables) with the lock trigger and an "observations are immutable" trigger, plus tests.
-3. A 90-day demo generator (fixed seed) that tells the demo story in `CONTEXT.md`, writing into SQLite.
-4. `GET /api/branches/{id}` and `GET /api/records/{id}` from the database.
-5. Baselines (30-day rolling median and MAD), change detection (5 of 7 days beyond 2 MADs, `ruptures` PELT for the start date, 14-day cooldown), and the pattern finder that returns counts with record IDs.
-6. `POST /api/experiments/{id}/lock`, `POST /api/demo/advance`, and experiment evaluation (supported / not supported / insufficient data under 70% adherence or fewer than 7 days).
+1. Apple Health importer: stream-parse export.xml, skip the profile record, rename "Name's Apple Watch" to "Apple Watch", write source_records + observations (first to cut if short on time).
+2. Help Mayank wire his tools to the functions above; help Satwik flip `USE_MOCK` to false.
