@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { synthesizeWithElevenLabs } from '../../api';
+import { readAskAudit } from '../../askAudit';
 import type { AskResponse, BranchDetailResponse, BranchHypothesis } from '../../types';
 
 interface InvestigationPanelProps {
@@ -242,6 +243,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
 
   // 2. ASK RESPONSE VIEW
   if (askResult && askQuestion) {
+    const { provider } = readAskAudit(askResult.sent_to_ai);
     return (
       <aside
         className="w-[448px] shrink-0 h-full overflow-y-auto flex flex-col"
@@ -266,7 +268,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 font-mono text-[9.5px] text-branchOpen">
                 <Sparkles className="w-3 h-3" />
-                <span>BEDROCK HAIKU · CITATION-CHECKED</span>
+                <span className="uppercase">{provider ? `${provider} · ` : ''}Citation-checked</span>
               </div>
               <h2 className="font-serif italic text-[17px] text-t1 truncate">{askQuestion}</h2>
             </div>
