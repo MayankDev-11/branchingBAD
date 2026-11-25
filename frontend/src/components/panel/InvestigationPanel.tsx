@@ -66,8 +66,9 @@ const HypothesisCard: React.FC<{
   hyp: BranchHypothesis;
   defaultExpanded: boolean;
   testLabel?: string;
+  workspace?: boolean;
   onOpenRecord: (id: string) => void;
-}> = ({ hyp, defaultExpanded, testLabel = 'Test', onOpenRecord }) => {
+}> = ({ hyp, defaultExpanded, testLabel = 'Test', workspace = false, onOpenRecord }) => {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const pct = hyp.confidence;
   const borderColor =
@@ -121,6 +122,9 @@ const HypothesisCard: React.FC<{
                 {badge.icon}
                 {badge.label}
               </span>}
+              {workspace && pct === undefined && (
+                <span className="text-[10px] font-semibold text-t3">Unscored</span>
+              )}
             </div>
             {!expanded && <p className="mt-1 text-[11.5px] text-t2 leading-relaxed">
               {hyp.claims[0]?.text ?? `No direct claims yet · Proposed: ${hyp.test}`}
@@ -165,7 +169,7 @@ const HypothesisCard: React.FC<{
             ))
           ) : (
             <p className="font-mono text-[10.5px] text-t3">
-              No verified record links yet. Log 7+ days to evaluate.
+              No matching record links yet.
             </p>
           )}
           {hyp.test && <div
@@ -348,6 +352,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
 
   if (!branch) return null;
 
+  const workspace = branch.id.startsWith('br_custom_');
   const exp = branch.experiment;
   const adherencePct = Math.min(100, Math.max(0, exp?.adherence_pct ?? 0));
   const firstCitedId = branch.hypotheses[0]?.claims[0]?.record_ids[0] ?? branch.change_event?.record_ids[0];
@@ -365,9 +370,11 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
     }
     const top = branch.hypotheses[0];
     const spoken = top
-      ? `Investigation: ${branch.title}. Top finding is ${top.label ?? top.text} at ${top.confidence ?? 0} percent confidence. ${
+      ? `Investigation: ${branch.title}. ${top.label ?? top.text}.${
+          top.confidence === undefined ? '' : ` The pattern score is ${top.confidence} percent.`
+        } ${
           top.claims[0]?.text ?? 'Not enough data yet'
-        }. ${exp ? `Locked experiment: ${exp.description}, currently at ${adherencePct} percent adherence.` : 'No experiment locked yet.'}`
+        }. ${exp ? `Locked experiment: ${exp.description}, currently at ${adherencePct} percent adherence.` : ''}`
       : `Investigation: ${branch.title}. Not enough data yet.`;
     setSpeakingSummary(true);
     try {
@@ -492,6 +499,8 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
               key={hyp.rank}
               hyp={hyp}
               defaultExpanded={hyp.rank === 1}
+              workspace={workspace}
+              testLabel={workspace ? 'Next step' : 'Test'}
               onOpenRecord={(rid) => onOpenRecord(rid, 'raw')}
             />
           ))}

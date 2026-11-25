@@ -26,7 +26,7 @@ def test_branch_is_saved_visible_and_account_scoped(monkeypatch, tmp_path, fresh
         branch, detail = result.json()["branch"], result.json()["detail"]
         branch_id = branch["id"]
         assert branch["branch_type"] == "habit"
-        assert detail["hypotheses"][0]["confidence"] == 0
+        assert "confidence" not in detail["hypotheses"][0]
         assert detail["hypotheses"][0]["claims"] == []
         assert detail["experiment"] is None
         assert {item["metric"] for item in detail["evidence"]} == {"steps", "screen_late_min", "caffeine_pm"}
@@ -53,3 +53,33 @@ def test_branch_is_saved_visible_and_account_scoped(monkeypatch, tmp_path, fresh
     with sqlite3.connect(path) as conn:
         payload = conn.execute("SELECT payload FROM workspace_branches WHERE id = ?", (branch_id,)).fetchone()[0]
     assert "Private transcript" not in payload
+
+
+def test_workspace_scores_only_when_the_outcome_is_tracked(monkeypatch, tmp_path, fresh_store):
+    monkeypatch.setenv("ROOTTRACE_WORKSPACE_DB", str(tmp_path / "workspace.db"))
+    with TestClient(app) as client:
+        assert client.post("/api/auth/demo").status_code == 200
+        base = {**DRAFT, "branch_type": "investigation", "metrics": ["sleep_min"],
+                "hypotheses": ["Prior-night sleep debt", "Low water intake", "Late-night screen"]}
+        response = client.post("/api/branches", json={**base, "title": "Why do I crash after lunch?"})
+        assert response.status_code == 201, response.text
+        branch = response.json()["detail"]
+        assert [factor["label"] for factor in branch["hypotheses"]] == ["Short sleep"]
+        factor = branch["hypotheses"][0]
+        assert "confidence" not in factor
+        assert "Linked sleep averaged" in factor["claims"][0]["text"]
+        assert "Afternoon energy is missing" in factor["test"]
+        assert factor["claims"][0]["record_ids"]
+        assert client.get(f"/api/branches/{branch['id']}").json() == branch
+
+        response = client.post("/api/branches", json={
+            **base, "title": "Does short sleep precede headaches?", "hypotheses": [], "outcome": "headache",
+        })
+        assert response.status_code == 201, response.text
+        factors = response.json()["detail"]["hypotheses"]
+        assert [factor["label"] for factor in factors] == ["Short sleep"]
+        (factor,) = factors
+        assert 0 < factor["confidence"] <= 100
+        assert "headache days" in factor["claims"][0]["text"]
+        assert all(client.get(f"/api/records/{record_id}").status_code == 200
+                   for record_id in factor["claims"][0]["record_ids"])

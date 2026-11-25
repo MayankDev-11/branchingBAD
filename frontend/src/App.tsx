@@ -86,6 +86,14 @@ export const App: React.FC = () => {
       setGraph(g);
       setBranchDetailsMap({ br_0: br0, br_1: br1 });
       setIsDataConnected(true);
+      const pendingBranches = g.branches.filter(({ id }) => id.startsWith('br_custom_'));
+      const workspaceDetails = await Promise.allSettled(pendingBranches.map(({ id }) => api.getBranch(id)));
+      setBranchDetailsMap((prev) => ({
+        ...prev,
+        ...Object.fromEntries(workspaceDetails.flatMap((result) =>
+          result.status === 'fulfilled' ? [[result.value.id, result.value]] : []
+        )),
+      }));
       await insightsRequest;
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to load RootTrace data');
@@ -162,6 +170,8 @@ export const App: React.FC = () => {
     setBranchDetailsMap((prev) => ({ ...prev, [branch.id]: detail }));
     setSelectedBranchId(branch.id);
     setSelectedBranch(detail);
+    setAskResult(null);
+    setAskQuestion(null);
     setActiveView('investigations');
   };
 

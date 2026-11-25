@@ -259,7 +259,7 @@ export const SubHypothesisNode: React.FC<NodeProps> = ({ data }) => {
   const d = data as {
     rank: number;
     label: string;
-    confidence: number;
+    confidence?: number;
     detail: string;
     tone: 'emerald' | 'cyan' | 'muted' | 'solved';
     compact?: boolean;
@@ -301,8 +301,11 @@ export const SubHypothesisNode: React.FC<NodeProps> = ({ data }) => {
           <span className={`${d.compact ? 'text-[11.5px]' : 'text-[12.5px]'} font-semibold text-t1 truncate`}>
             {d.compact ? d.label : `${d.rank}. ${d.label}`}
           </span>
-          <span className="font-mono text-[10.5px] font-bold" style={{ color: accent.text }}>
-            {d.confidence}%
+          <span
+            className="shrink-0 font-mono text-[10.5px]"
+            style={{ color: d.confidence === undefined ? 'var(--t3)' : accent.text }}
+          >
+            {d.confidence === undefined ? 'Unscored' : `${d.confidence}%`}
           </span>
         </div>
         <p className="mt-0.5 font-mono text-[9px] text-t3 truncate">{d.detail}</p>

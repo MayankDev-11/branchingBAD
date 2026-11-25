@@ -568,6 +568,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
     const extraBranches = graph.branches.filter((b) => b.id !== 'br_0' && b.id !== 'br_1');
     extraBranches.forEach((cb, idx) => {
       const detail = branchDetailsMap[cb.id];
+      const factorCount = detail?.hypotheses.length;
       const side: -1 | 1 = idx % 2 === 0 ? -1 : 1;
       const startX = 1460 + idx * 240;
       const hubX = startX + 160;
@@ -588,7 +589,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
             status: cb.status,
             branchType: cb.branch_type,
             labelSide: side === -1 ? 'above' : 'below',
-            subtitle: `${cb.branch_type === 'habit' ? 'Habit' : 'Investigation'} · New · ${detail?.hypotheses.length ?? 2} sub-branches`,
+            subtitle: `${cb.branch_type === 'habit' ? 'Habit' : 'Investigation'} · New · ${factorCount === undefined ? 'Workspace' : `${factorCount} ${factorCount === 1 ? 'factor' : 'factors'}`}`,
             isSelected: selectedBranchId === cb.id,
             onSelect: onSelectBranch,
           },
@@ -614,8 +615,8 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
           data: {
             rank: hyp.rank,
             label: hyp.label ?? hyp.text ?? 'Sub-branch',
-            confidence: hyp.confidence ?? 45,
-            detail: hyp.test,
+            confidence: hyp.confidence,
+            detail: hyp.claims[0]?.text ?? hyp.test,
             tone: sIdx === 0 ? 'emerald' : 'cyan',
             compact: true,
             onClick: () => onSelectBranch(cb.id),

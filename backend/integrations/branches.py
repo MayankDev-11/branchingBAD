@@ -16,6 +16,7 @@ from backend.auth.dependencies import CurrentUser, get_current_user
 from backend.data.metrics import METRICS
 from backend.data.queries import build_record
 from backend.data.store import store
+from backend.integrations.branch_evidence import workspace_hypotheses
 from backend.routes.branches import get_branch as demo_branch
 from backend.routes.experiments import AdvanceBody, advance as advance_demo, reset as reset_demo
 from backend.routes.graph import get_graph as demo_graph
@@ -32,6 +33,7 @@ class BranchInput(BaseModel):
     branch_type: Literal["investigation", "habit"]
     start_date: date
     metrics: list[str] = Field(max_length=12)
+    outcome: Literal["auto", "headache", "sleep_min", "afternoon_energy", "untracked"] = "auto"
     hypotheses: list[Label] = Field(max_length=20)
     created_via: Literal["manual", "elevenlabs_voice"]
     voice_transcript: str | None = Field(default=None, max_length=16000, exclude=True)
@@ -79,34 +81,27 @@ def workspace_branch(user_id: str, branch_id: str) -> dict | None:
     return json.loads(row["payload"]) if row else None
 
 
-def _context(metrics: list[str], start: str) -> list[dict]:
+def _detail(branch_id: str, payload: dict) -> dict:
     readings = []
     with store.connection() as conn:
-        end = min(start, store.clock.isoformat())
-        for metric in metrics:
+        clock = store.clock
+        end = min(payload["start_date"], clock.isoformat())
+        hypotheses = workspace_hypotheses(conn, payload, clock)
+        for metric in payload["metrics"]:
             rows = conn.execute(
                 "SELECT id FROM observations WHERE metric = ? AND date <= ? AND is_excluded = 0 "
                 "ORDER BY date DESC, id DESC LIMIT 2",
                 (metric, end),
             )
             for row in rows:
-                record = build_record(conn, row["id"], store.clock)
-                readings.append({key: record[key] for key in
-                                 ("id", "date", "metric", "value", "device", "source_id")})
-                readings[-1]["label"] = METRICS[metric].label(record["value"])
-    return readings
-
-
-def _detail(branch_id: str, payload: dict, evidence: list[dict]) -> dict:
-    test = "Log the selected metrics consistently and review the pattern before designing an experiment."
+                record = build_record(conn, row["id"], clock)
+                reading = {key: record[key] for key in ("id", "date", "metric", "value", "device", "source_id")}
+                reading["label"] = METRICS[metric].label(record["value"])
+                readings.append(reading)
     return {
         "id": branch_id, "title": payload["title"], "branch_type": payload["branch_type"],
         "status": "open", "start_date": payload["start_date"], "change_event": None,
-        "hypotheses": [
-            {"rank": rank, "label": label, "confidence": 0, "claims": [], "test": test}
-            for rank, label in enumerate(payload["hypotheses"], 1)
-        ],
-        "experiment": None, "evidence": evidence,
+        "hypotheses": hypotheses, "experiment": None, "evidence": readings,
     }
 
 
@@ -126,8 +121,8 @@ def _with_workspace(graph: dict, user_id: str) -> dict:
 def create_branch(body: BranchInput, user: User, response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store"
     payload = body.model_dump(mode="json")
-    evidence = _context(payload["metrics"], payload["start_date"])
     branch_id = f"br_custom_{uuid4().hex}"
+    detail = _detail(branch_id, payload)
     with closing(_connect()) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
         total = conn.execute(
@@ -139,7 +134,7 @@ def create_branch(body: BranchInput, user: User, response: Response) -> dict:
         )
     return {
         "branch": _summary(branch_id, payload, total + 2),
-        "detail": _detail(branch_id, payload, evidence),
+        "detail": detail,
     }
 
 
@@ -157,7 +152,7 @@ def branch_detail(branch_id: str, user: User, response: Response) -> dict:
     payload = workspace_branch(user.id, branch_id)
     if payload is None:
         raise HTTPException(404, "Branch not found.")
-    return _detail(branch_id, payload, _context(payload["metrics"], payload["start_date"]))
+    return _detail(branch_id, payload)
 
 
 @router.post("/demo/advance")

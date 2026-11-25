@@ -57,5 +57,8 @@ workspace database (`data/roottrace_workspace.db`, overridable with
 `ROOTTRACE_WORKSPACE_DB`). They stay visible after reload or a demo clock reset.
 The shared Judge Demo login uses one shared demo account.
 
-Selected metrics display real demo readings for context. User-entered hypotheses
-start without verified claims or an experiment. The voice transcript is not persisted.
+Select linked factors and the outcome the branch should explain. Leaving possible
+factors blank derives them from the chosen metrics. Linked demo readings remain
+available for context. Matched, supported demo outcomes use Python's pattern
+comparison for scoring. Missing outcomes, such as afternoon energy, and factors
+with insufficient paired evidence stay unscored. The voice transcript is not persisted.

@@ -23,7 +23,14 @@ interface NewBranchModalProps {
   onCreate: (input: CreateBranchInput) => Promise<void>;
 }
 
-const METRIC_OPTIONS = ['sleep_min', 'water_ml', 'steps', 'headache', 'late_screen_min', 'caffeine'];
+const METRIC_OPTIONS = [
+  ['sleep_min', 'Sleep'],
+  ['water_ml', 'Water intake'],
+  ['steps', 'Steps'],
+  ['headache', 'Headache'],
+  ['late_screen_min', 'Late screen time'],
+  ['caffeine', 'Late caffeine'],
+] as const;
 
 const VOICE_PRESETS = [
   {
@@ -34,7 +41,7 @@ const VOICE_PRESETS = [
       title: 'Why do I crash at 3 PM every afternoon?',
       branch_type: 'investigation' as const,
       metrics: ['sleep_min', 'steps'],
-      hypotheses: ['Heavy carb lunch spike', 'Accumulated sleep debt', 'Sedentary afternoon'],
+      hypotheses: [],
     },
   },
   {
@@ -45,7 +52,7 @@ const VOICE_PRESETS = [
       title: 'Walk 25 min every morning before 9 AM',
       branch_type: 'habit' as const,
       metrics: ['steps', 'sleep_min'],
-      hypotheses: ['Morning sunlight & step cue', 'Higher afternoon energy'],
+      hypotheses: [],
     },
   },
 ];
@@ -78,19 +85,12 @@ function extractStructuredFromTranscript(transcript: string): {
   const shortTitle =
     cleanedTitle.length > 58 ? `${cleanedTitle.slice(0, 56).trim()}…` : cleanedTitle || 'New health investigation';
 
-  const hypotheses = isHabit
-    ? ['Consistent morning cue', 'Sustained energy gain']
-    : [
-        metrics.includes('sleep_min') ? 'Prior-night sleep debt' : 'Baseline metric shift',
-        metrics.includes('water_ml') ? 'Low daytime hydration' : 'Meal / routine timing',
-        'Contextual stress confounder',
-      ];
 
   return {
     title: shortTitle,
     branch_type: isHabit ? 'habit' : 'investigation',
     metrics,
-    hypotheses,
+    hypotheses: [],
   };
 }
 
@@ -104,7 +104,8 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
   const [branchType, setBranchType] = useState<'investigation' | 'habit'>('investigation');
   const [title, setTitle] = useState('');
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>(['sleep_min']);
-  const [hypInput, setHypInput] = useState('Prior-night sleep debt, Low water intake, Late-night screen');
+  const [hypInput, setHypInput] = useState('');
+  const [outcome, setOutcome] = useState<NonNullable<CreateBranchInput['outcome']>>('auto');
   const [startDate, setStartDate] = useState('2026-11-18');
   const [submitting, setSubmitting] = useState(false);
 
@@ -149,6 +150,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
     setBranchType(parsed.branch_type);
     setSelectedMetrics(parsed.metrics);
     setHypInput(parsed.hypotheses.join(', '));
+    setOutcome('auto');
   };
 
   const speakConfirmation = (text: string) => {
@@ -269,11 +271,14 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
         branch_type: branchType,
         start_date: startDate,
         metrics: selectedMetrics,
+        outcome,
         hypotheses: hyps,
         created_via: mode === 'voice' ? 'elevenlabs_voice' : 'manual',
         voice_transcript: mode === 'voice' ? transcript : undefined,
       });
       setTitle('');
+      setHypInput('');
+      setOutcome('auto');
       setTranscript('');
       onClose();
     } finally {
@@ -494,16 +499,35 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
           {/* Sub-branches (Hypotheses) */}
           <div>
             <label className="block font-mono text-[10px] uppercase text-t3 mb-1.5">
-              Initial Sub-Branches (comma-separated, 2–3 competing explanations)
+              Possible factors (optional, comma-separated)
             </label>
             <input
               type="text"
+              placeholder="Leave blank to use the linked metrics"
               value={hypInput}
               onChange={(e) => setHypInput(e.target.value)}
               className="w-full px-3.5 py-2 rounded-xl font-mono text-[11.5px] text-t2 focus:outline-none"
               style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
             />
           </div>
+
+          {branchType === 'investigation' && (
+            <label className="block space-y-1.5">
+              <span className="block font-mono text-[10px] uppercase text-t3">Outcome to explain</span>
+              <select
+                value={outcome}
+                onChange={(e) => setOutcome(e.target.value as NonNullable<CreateBranchInput['outcome']>)}
+                className="w-full rounded-lg px-2.5 py-1.5 text-[11px] text-t1"
+                style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border-strong)' }}
+              >
+                <option value="auto">Infer from my question</option>
+                <option value="headache">Headache days</option>
+                <option value="sleep_min">Short sleep</option>
+                <option value="afternoon_energy">Afternoon energy (no demo readings)</option>
+                <option value="untracked">Other outcome</option>
+              </select>
+            </label>
+          )}
 
           {/* Tracked Metrics & Start Date */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -512,7 +536,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
                 Metrics to Link
               </label>
               <div className="flex flex-wrap gap-1.5">
-                {METRIC_OPTIONS.map((m) => {
+                {METRIC_OPTIONS.map(([m, label]) => {
                   const active = selectedMetrics.includes(m);
                   return (
                     <button
@@ -526,7 +550,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
                         border: active ? '1px solid var(--branch-open)' : '1px solid var(--border)',
                       }}
                     >
-                      {m}
+                      {label}
                     </button>
                   );
                 })}

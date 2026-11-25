@@ -109,6 +109,7 @@ export interface CreateBranchInput {
   branch_type: 'investigation' | 'habit';
   start_date: string;
   metrics: string[];
+  outcome?: 'auto' | 'headache' | 'sleep_min' | 'afternoon_energy' | 'untracked';
   hypotheses: string[];
   created_via: 'manual' | 'elevenlabs_voice';
   voice_transcript?: string;
