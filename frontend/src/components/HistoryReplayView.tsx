@@ -33,6 +33,7 @@ import type {
   GraphResponse,
   InsightsResponse,
   KnowledgeItem,
+  WorkspaceHistoryEntry,
 } from '../types';
 import {
   AnchorNode,
@@ -43,6 +44,7 @@ import {
   KnowledgeNode,
   MeltConfluenceNode,
   SubHypothesisNode,
+  TimelineResolutionNode,
 } from './graph/CustomNodes';
 import { OrganicBranchEdge, TrunkEdge } from './graph/CustomEdges';
 import { SmoothZoomControls } from './graph/SmoothZoomControls';
@@ -55,6 +57,7 @@ const nodeTypes = {
   experimentLeaf: ExperimentLeafNode,
   meltConfluence: MeltConfluenceNode,
   knowledgeNode: KnowledgeNode,
+  timelineResolution: TimelineResolutionNode,
   evidenceDewdrop: EvidenceDewdropNode,
 };
 
@@ -111,6 +114,8 @@ const hypNote =(hyp: BranchHypothesis) => `${hyp.confidence ?? 0}% · ${hyp.clai
 
 interface HistoryData {
   graph: GraphResponse;
+  workspaceHistory: WorkspaceHistoryEntry[];
+  branchDetailsMap: Record<string, BranchDetailResponse>;
   br0?: GraphBranch;
   br1?: GraphBranch;
   d0?: BranchDetailResponse;
@@ -263,11 +268,44 @@ const buildMilestones = (d: HistoryData): HistoryMilestone[] => {
       });
     }
   }
+  for (const entry of d.workspaceHistory) {
+    const detail = d.branchDetailsMap[entry.id];
+    const factors = detail?.hypotheses ?? [];
+    const records = [...new Set(factors.flatMap((factor) => factor.claims.flatMap((claim) => claim.record_ids)))];
+    const branchKind = entry.branch_type === 'habit' ? 'Habit' : 'Investigation';
+    steps.push({
+      id: `created-${entry.id}`, date: entry.start_date, dateLabel: longLabel(entry.start_date),
+      tag: 'BRANCH CREATED', tone: 'var(--trunk)', title: `Created: ${entry.title}`, branchId: entry.id,
+      whyCreated: `${branchKind} added to your workspace.`,
+      hypotheses: factors.map((factor) => ({
+        name: factor.label ?? factor.text ?? 'Factor', status: 'active',
+        note: factor.claims[0]?.text ?? factor.test,
+      })),
+      experimentNote: 'Workspace branch opened for investigation.',
+      solution: 'Branch added to the graph.', recordIds: records,
+    });
+    if (entry.closed_date && entry.lifecycle !== 'open') {
+      const resolved = entry.lifecycle === 'resolved';
+      steps.push({
+        id: `closed-${entry.id}`, date: entry.closed_date, dateLabel: longLabel(entry.closed_date),
+        tag: resolved ? 'BRANCH RESOLVED' : 'BRANCH DISSOLVED',
+        tone: resolved ? 'var(--ok)' : 'var(--t3)',
+        title: `${resolved ? 'Resolved' : 'Dissolved'}: ${entry.title}`, branchId: entry.id,
+        whyCreated: resolved ? 'You closed the branch and saved a note on the main timeline.'
+          : 'You removed the branch from the live graph. Its history is preserved.',
+        hypotheses: [],
+        experimentNote: 'Manually closed from the workspace.',
+        solution: entry.resolution ?? 'Archived in History.', recordIds: records,
+      });
+    }
+  }
+
   return steps.sort((a, b) => a.date.localeCompare(b.date));
 };
 
 interface HistoryReplayViewProps {
   graph: GraphResponse;
+  workspaceHistory: WorkspaceHistoryEntry[];
   branchDetailsMap: Record<string, BranchDetailResponse>;
   insights: InsightsResponse | null;
   onOpenRecord: (id: string, tab?: 'raw' | 'ai') => void;
@@ -276,6 +314,7 @@ interface HistoryReplayViewProps {
 
 const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
   graph,
+  workspaceHistory,
   branchDetailsMap,
   insights,
   onOpenRecord,
@@ -285,9 +324,11 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
   const data = useMemo<HistoryData>(() => {
     const br0 = graph.branches.find((b) => b.id === 'br_0');
     const br1 = graph.branches.find((b) => b.id === 'br_1');
-    const knFor = (b?: GraphBranch) => (b?.end_date ? graph.knowledge.find((k) => k.date === b.end_date) : undefined);
+    const knFor = (b?: GraphBranch) => (b?.end_date ? graph.knowledge.find((k) => !k.id.startsWith('kn_br_custom_') && k.date === b.end_date) : undefined);
     return {
       graph,
+      workspaceHistory,
+      branchDetailsMap,
       br0,
       br1,
       d0: branchDetailsMap['br_0'],
@@ -296,14 +337,17 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
       kn1: knFor(br1),
       insights,
     };
-  }, [graph, branchDetailsMap, insights]);
+  }, [graph, workspaceHistory, branchDetailsMap, insights]);
   const ALL_MILESTONES = useMemo(() => buildMilestones(data), [data]);
-  const [dateFrom, setDateFrom] = useState(graph.range.start);
-  const [dateTo, setDateTo] = useState(graph.range.end);
+  const historyStart = ALL_MILESTONES[0]?.date ?? graph.range.start;
+  const historyEnd = [graph.range.end, ALL_MILESTONES.slice(-1)[0]?.date ?? graph.range.end].sort()[1];
+  const [dateFrom, setDateFrom] = useState(historyStart);
+  const [dateTo, setDateTo] = useState(historyEnd);
   // When the demo clock moves (+10 days / Reset), extend or shrink the window with it.
   useEffect(() => {
-    setDateTo(graph.range.end);
-  }, [graph.range.end]);
+    setDateFrom(historyStart);
+    setDateTo(historyEnd);
+  }, [historyStart, historyEnd]);
   const [stepIdx, setStepIdx] = useState(0);
   const [autoPlay, setAutoPlay] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
@@ -700,8 +744,38 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
       }
     }
 
+    workspaceHistory.forEach((entry, index) => {
+      if (entry.start_date >= dateFrom && !revealedIds.has(`created-${entry.id}`)) return;
+      if (entry.start_date > currentDate) return;
+      const closed = entry.closed_date && (entry.closed_date < dateFrom || revealedIds.has(`closed-${entry.id}`));
+      const x = Math.min(currentX - 25, Math.max(startX + 40, dateToX(rangeStart, entry.start_date)));
+      if (closed && entry.lifecycle === 'resolved') {
+        const closedX = Math.min(currentX - 25, Math.max(startX + 40, dateToX(rangeStart, entry.closed_date!)));
+        n.push({
+          id: `resolved-${entry.id}`, type: 'timelineResolution',
+          position: { x: closedX - 14, y: TRUNK_Y - 14 },
+          data: { title: entry.title, dateLabel: shortDate(entry.closed_date!),
+                  onClick: () => onJumpToBranch(entry.id) },
+        });
+      } else if (!closed) {
+        n.push(
+          { id: `start-${entry.id}`, type: 'anchor', position: { x, y: TRUNK_Y }, data: {} },
+          { id: `history-${entry.id}`, type: 'branchHub',
+            position: { x: x + 145 + Math.floor(index / 2) * 200, y: alternatingY(index % 2 === 0 ? -1 : 1, 1) },
+            data: { id: entry.id, title: entry.title, status: 'open', branchType: entry.branch_type,
+                    subtitle: 'Workspace branch', isSelected: currentStep.branchId === entry.id,
+                    onSelect: () => {
+                      const step = visibleSteps.findIndex(({ id }) => id === `created-${entry.id}`);
+                      if (step >= 0) setStepIdx(step);
+                    } } },
+        );
+        e.push({ id: `history-edge-${entry.id}`, source: `start-${entry.id}`, target: `history-${entry.id}`,
+                 type: 'organicBranch', data: { kind: 'branch-open' } });
+      }
+    });
+
     return { nodes: n, edges: e };
-  }, [graph, data, insights, ALL_MILESTONES, dateFrom, currentDate, currentStep, revealedIds, onJumpToBranch, onOpenRecord]);
+  }, [graph, data, insights, ALL_MILESTONES, dateFrom, currentDate, currentStep, revealedIds, onJumpToBranch, onOpenRecord, workspaceHistory, visibleSteps]);
 
   // Smoothly pan/fit the camera as new branches grow on each Right Arrow press!
   useEffect(() => {
@@ -747,7 +821,7 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
             <span>From</span>
             <input
               type="date"
-              min={graph.range.start}
+              min={historyStart}
               max={dateTo}
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
@@ -761,7 +835,7 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
             <input
               type="date"
               min={dateFrom}
-              max={graph.range.end}
+              max={historyEnd}
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
               className="px-2.5 py-1 rounded-lg font-mono text-[11px] text-t1 focus:outline-none"
@@ -772,9 +846,9 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
           {/* Quick Range Presets */}
           <div className="hidden xl:flex items-center gap-1.5 ml-1">
             {[
-              { lbl: 'All data', from: graph.range.start, to: graph.range.end },
-              { lbl: 'Last 60d', from: isoMinusDays(graph.range.end, 59), to: graph.range.end },
-              { lbl: 'Last 21d', from: isoMinusDays(graph.range.end, 20), to: graph.range.end },
+              { lbl: 'All data', from: historyStart, to: historyEnd },
+              { lbl: 'Last 60d', from: isoMinusDays(historyEnd, 59), to: historyEnd },
+              { lbl: 'Last 21d', from: isoMinusDays(historyEnd, 20), to: historyEnd },
             ].map((p) => (
               <button
                 key={p.lbl}

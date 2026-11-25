@@ -104,6 +104,18 @@ export interface BranchDetailResponse {
   evidence: EvidenceRow[];
 }
 
+export type BranchAction = 'resolve' | 'dissolve';
+
+export interface WorkspaceHistoryEntry {
+  id: string;
+  title: string;
+  branch_type: 'investigation' | 'habit';
+  start_date: string;
+  lifecycle: 'open' | 'resolved' | 'dissolved';
+  closed_date: string | null;
+  resolution: string | null;
+}
+
 export interface CreateBranchInput {
   title: string;
   branch_type: 'investigation' | 'habit';

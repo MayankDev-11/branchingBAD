@@ -62,3 +62,14 @@ factors blank derives them from the chosen metrics. Linked demo readings remain
 available for context. Matched, supported demo outcomes use Python's pattern
 comparison for scoring. Missing outcomes, such as afternoon energy, and factors
 with insufficient paired evidence stay unscored. The voice transcript is not persisted.
+
+Workspace branches can be resolved or dissolved from Investigations. Resolving
+requires a note and moves that note into the main timeline as a user resolution.
+Dissolving removes the branch from the active graph. History replays both the
+creation and closure dates for user-owned branches.
+
+ElevenLabs narration and microphone transcription use the server-side
+`ELEVENLABS_API_KEY`. Set `ELEVENLABS_VOICE_ID` to choose the voice. The guided
+audio brief keeps its browser speech fallback. Voice recordings are sent to
+ElevenLabs only when using microphone transcription. The raw recording is not
+retained by the app. [ElevenLabs transcription](https://elevenlabs.io/docs/api-reference/speech-to-text/convert) · [Narration](https://elevenlabs.io/docs/api-reference/text-to-speech/convert)

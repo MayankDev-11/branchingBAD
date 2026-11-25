@@ -6,6 +6,7 @@ from fastapi.routing import APIRoute
 from backend.auth import auth_router, get_current_user
 from backend.integrations.branches import router as workspace_router
 from backend.integrations.routes import router
+from backend.integrations.voice import router as voice_router
 from backend.main import app as demo_app
 from backend.routes import branches, experiments, insights
 
@@ -32,3 +33,4 @@ for source, paths in (
 app.include_router(demo_routes, dependencies=[Depends(get_current_user)])
 app.include_router(workspace_router)
 app.include_router(router)
+app.include_router(voice_router)

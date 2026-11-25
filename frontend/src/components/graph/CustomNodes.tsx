@@ -380,3 +380,23 @@ export const EvidenceDewdropNode: React.FC<NodeProps> = ({ data }) => {
     </button>
   );
 };
+
+export const TimelineResolutionNode: React.FC<NodeProps> = ({ data }) => {
+  const { title, dateLabel, onClick } = data as { title: string; dateLabel: string; onClick: () => void };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="group relative flex h-7 w-7 items-center justify-center rounded-full border border-branchOpen bg-s1 text-branchOpen"
+    >
+      <GitMerge className="h-4 w-4" />
+      <span
+        className="absolute bottom-9 left-1/2 w-[172px] -translate-x-1/2 rounded-xl border border-border bg-s1 px-3 py-2 text-left shadow-lg"
+      >
+        <span className="block truncate text-[12px] font-semibold text-t1">{title}</span>
+        <span className="block font-mono text-[9px] text-branchOpen">Resolved note · {dateLabel}</span>
+      </span>
+    </button>
+  );
+};

@@ -83,3 +83,45 @@ def test_workspace_scores_only_when_the_outcome_is_tracked(monkeypatch, tmp_path
         assert "headache days" in factor["claims"][0]["text"]
         assert all(client.get(f"/api/records/{record_id}").status_code == 200
                    for record_id in factor["claims"][0]["record_ids"])
+
+
+def test_workspace_transitions_keep_history_without_fabricating_factors(monkeypatch, tmp_path, fresh_store):
+    monkeypatch.setenv("ROOTTRACE_WORKSPACE_DB", str(tmp_path / "workspace.db"))
+    with TestClient(app) as client:
+        assert client.get("/api/branches/history").status_code == 401
+        assert client.post("/api/auth/demo").status_code == 200
+        payload = {**DRAFT, "branch_type": "investigation", "title": "hwuif", "metrics": ["sleep_min"],
+                   "hypotheses": []}
+        first = client.post("/api/branches", json=payload).json()["detail"]
+        second = client.post("/api/branches", json={**payload, "title": "A question to review"}).json()["detail"]
+        assert first["hypotheses"] == []
+        assert first["evidence"]
+        history = client.get("/api/branches/history").json()
+        assert [entry["lifecycle"] for entry in history] == ["open", "open"]
+
+        first_action = f"/api/branches/{first['id']}/transition"
+        assert client.post(first_action, json={"action": "resolve"}).status_code == 422
+        note = {"action": "resolve", "resolution": "Recorded for follow-up."}
+        resolved = client.post(first_action, json=note)
+        assert resolved.status_code == 200, resolved.text
+        assert resolved.json()["detail"]["status"] == "concluded"
+        item = next(item for item in resolved.json()["graph"]["knowledge"] if item["id"] == f"kn_{first['id']}")
+        assert item["statement"] == note["resolution"]
+        assert item["confidence"] == "user note"
+        assert client.post(first_action, json=note).status_code == 200
+        assert client.post(first_action, json={"action": "dissolve"}).status_code == 409
+
+        dissolved = client.post(f"/api/branches/{second['id']}/transition", json={"action": "dissolve"}).json()
+        assert second["id"] not in {branch["id"] for branch in dissolved["graph"]["branches"]}
+        assert dissolved["history"] == client.get("/api/branches/history").json()
+        assert [entry["lifecycle"] for entry in dissolved["history"]] == ["resolved", "dissolved"]
+        assert client.get(f"/api/branches/{second['id']}").status_code == 200
+        assert item in client.post("/api/demo/reset").json()["knowledge"]
+
+        client.cookies.clear()
+        assert client.post("/api/auth/register", json={
+            "full_name": "Separate Account", "email": "separate@example.test", "password": "TestPassword123",
+        }).status_code == 201
+        assert client.get("/api/branches/history").json() == []
+        assert client.post(first_action, json={"action": "dissolve"}).status_code == 404
+        assert item not in client.get("/api/graph").json()["knowledge"]

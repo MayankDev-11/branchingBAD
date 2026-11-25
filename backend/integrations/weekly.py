@@ -55,6 +55,20 @@ def audio_path(audio_id: str) -> Path | None:
     return path if path.is_file() and path.stat().st_size else None
 
 
+def render_audio(voice: str, key: str, payload: dict) -> bytes:
+    try:
+        response = httpx.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{voice}",
+            headers={"xi-api-key": key, "Accept": "audio/mpeg"}, json=payload, timeout=30,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise AudioUnavailable("ElevenLabs narration is temporarily unavailable.") from exc
+    if not response.content or not response.headers.get("content-type", "").startswith("audio/"):
+        raise AudioUnavailable("ElevenLabs returned no audio.")
+    return response.content
+
+
 def weekly_report() -> dict:
     lines = report_lines()
     load_dotenv()
@@ -70,19 +84,12 @@ def weekly_report() -> dict:
             if not key:
                 raise AudioUnavailable("Configure ELEVENLABS_API_KEY.")
             try:
-                response = httpx.post(
-                    f"https://api.elevenlabs.io/v1/text-to-speech/{voice}",
-                    headers={"xi-api-key": key, "Accept": "audio/mpeg"},
-                    json=payload, timeout=30,
-                )
-                response.raise_for_status()
-                if not response.content or not response.headers.get("content-type", "").startswith("audio/"):
-                    raise AudioUnavailable("ElevenLabs returned no audio.")
+                audio = render_audio(voice, key, payload)
                 CACHE.mkdir(parents=True, exist_ok=True)
                 with NamedTemporaryFile(dir=CACHE, delete=False) as writer:
                     pending = Path(writer.name)
                     try:
-                        writer.write(response.content)
+                        writer.write(audio)
                         writer.close()
                         pending.replace(CACHE / f"{digest}.mp3")
                     finally:

@@ -17,6 +17,7 @@ import {
 } from './components/SecondaryViews';
 import type {
   AskResponse,
+  BranchAction,
   BranchDetailResponse,
   CreateBranchInput,
   GraphResponse,
@@ -24,6 +25,7 @@ import type {
   NavView,
   RecordDetailResponse,
   ThemeMode,
+  WorkspaceHistoryEntry,
 } from './types';
 
 const VALID_THEMES: ThemeMode[] = ['slate-pro', 'teal', 'warm-neuro', 'lab-ivory', 'ppt-light'];
@@ -46,6 +48,7 @@ export const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
 
   const [graph, setGraph] = useState<GraphResponse | null>(null);
+  const [workspaceHistory, setWorkspaceHistory] = useState<WorkspaceHistoryEntry[]>([]);
   const [branchDetailsMap, setBranchDetailsMap] = useState<Record<string, BranchDetailResponse>>({});
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<BranchDetailResponse | null>(null);
@@ -78,15 +81,17 @@ export const App: React.FC = () => {
       setErrorMsg(null);
       // Insights load on their own so the graph still shows if that one request fails.
       const insightsRequest = api.getInsights().then(setInsights);
-      const [g, br0, br1] = await Promise.all([
+      const [g, br0, br1, history] = await Promise.all([
         api.getGraph(),
         api.getBranch('br_0'),
         api.getBranch('br_1'),
+        api.getBranchHistory(),
       ]);
       setGraph(g);
+      setWorkspaceHistory(history);
       setBranchDetailsMap({ br_0: br0, br_1: br1 });
       setIsDataConnected(true);
-      const pendingBranches = g.branches.filter(({ id }) => id.startsWith('br_custom_'));
+      const pendingBranches = history;
       const workspaceDetails = await Promise.allSettled(pendingBranches.map(({ id }) => api.getBranch(id)));
       setBranchDetailsMap((prev) => ({
         ...prev,
@@ -173,6 +178,18 @@ export const App: React.FC = () => {
     setAskResult(null);
     setAskQuestion(null);
     setActiveView('investigations');
+    void api.getBranchHistory().then(setWorkspaceHistory).catch(() => {
+      setErrorMsg('Branch saved. Refresh if it does not appear in History.');
+    });
+  };
+
+  const handleBranchTransition = async (id: string, action: BranchAction, resolution?: string) => {
+    const { graph: updatedGraph, detail, history } = await api.transitionBranch(id, action, resolution);
+    setGraph(updatedGraph);
+    setWorkspaceHistory(history);
+    setBranchDetailsMap((prev) => ({ ...prev, [id]: detail }));
+    setSelectedBranchId(action === 'resolve' ? id : null);
+    setSelectedBranch(action === 'resolve' ? detail : null);
   };
 
   const handleLockExperiment = async (expId: string) => {
@@ -319,6 +336,8 @@ export const App: React.FC = () => {
                           }}
                           onOpenRecord={handleOpenRecord}
                           onLockExperiment={handleLockExperiment}
+                          onBranchTransition={handleBranchTransition}
+                          resolution={workspaceHistory.find(({ id }) => id === selectedBranch?.id)?.resolution ?? null}
                         />
                       </motion.div>
                     )}
@@ -337,6 +356,7 @@ export const App: React.FC = () => {
                 <div className="flex-1 min-w-0 h-full">
                   <HistoryReplayView
                     graph={graph}
+                    workspaceHistory={workspaceHistory}
                     branchDetailsMap={branchDetailsMap}
                     insights={insights}
                     onOpenRecord={handleOpenRecord}

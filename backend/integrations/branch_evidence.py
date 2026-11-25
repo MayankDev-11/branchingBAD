@@ -63,8 +63,10 @@ def workspace_hypotheses(conn, payload, clock):
     if not labels or labels == LEGACY_DEFAULT:
         if payload["branch_type"] == "habit":
             labels = [f"Track {METRICS[metric].title.lower()}" for metric in metrics[:3]]
-        else:
+        elif outcome != "untracked":
             labels = [FACTOR_LABELS.get(metric, METRICS[metric].title) for metric in factors[:3]]
+        else:
+            labels = []
     end = min(date.fromisoformat(payload["start_date"]), clock)
     source = DEMO_OUTCOMES.get(outcome) if payload["branch_type"] == "investigation" else None
     matched_metrics = {

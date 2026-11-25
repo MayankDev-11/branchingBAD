@@ -3,7 +3,6 @@ import ReactDOM from 'react-dom';
 import {
   CheckCircle2,
   FlaskConical,
-  KeyRound,
   Mic,
   Plus,
   Repeat,
@@ -77,7 +76,6 @@ function extractStructuredFromTranscript(transcript: string): {
   if (lower.includes('headache')) metrics.push('headache');
   if (lower.includes('screen') || lower.includes('phone')) metrics.push('late_screen_min');
   if (lower.includes('coffee') || lower.includes('caffeine') || lower.includes('chai')) metrics.push('caffeine');
-  if (metrics.length === 0) metrics.push('sleep_min');
 
   const cleanedTitle = transcript
     .replace(/^(create|start|log|add)\s+(a\s+)?(new\s+)?(branch|habit|investigation)\s*(for|to|about)?\s*/i, '')
@@ -103,7 +101,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
   const [mode, setMode] = useState<'manual' | 'voice'>(initialMode);
   const [branchType, setBranchType] = useState<'investigation' | 'habit'>('investigation');
   const [title, setTitle] = useState('');
-  const [selectedMetrics, setSelectedMetrics] = useState<string[]>(['sleep_min']);
+  const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
   const [hypInput, setHypInput] = useState('');
   const [outcome, setOutcome] = useState<NonNullable<CreateBranchInput['outcome']>>('auto');
   const [startDate, setStartDate] = useState('2026-11-18');
@@ -113,15 +111,27 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [voiceStatus, setVoiceStatus] = useState<string>('Ready · Tap mic to speak or pick a quick voice sample');
-  const [elevenKey, setElevenKey] = useState(() => localStorage.getItem('elevenlabs_api_key') ?? '');
-  const [showKeyBox, setShowKeyBox] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const speechRecRef = useRef<any>(null);
+  const captureVersion = useRef(0);
+
+  useEffect(() => () => {
+    captureVersion.current += 1;
+    const recorder = mediaRecorderRef.current;
+    if (recorder) {
+      recorder.onstop = null;
+      recorder.ondataavailable = null;
+      if (recorder.state !== 'inactive') recorder.stop();
+      recorder.stream.getTracks().forEach((track) => track.stop());
+    }
+    mediaRecorderRef.current = null;
+    chunksRef.current = [];
+  }, [open, mode]);
 
   useEffect(() => {
     setMode(initialMode);
+    setIsRecording(false);
   }, [initialMode, open]);
 
   useEffect(() => {
@@ -136,7 +146,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
 
   const toggleMetric = (m: string) => {
     setSelectedMetrics((prev) =>
-      prev.includes(m) ? (prev.length > 1 ? prev.filter((x) => x !== m) : prev) : [...prev, m]
+      prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]
     );
   };
 
@@ -163,35 +173,18 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
   };
 
   const startVoiceCapture = async () => {
+    const version = ++captureVersion.current;
     setTranscript('');
     setIsRecording(true);
-    setVoiceStatus('Listening via microphone (ElevenLabs Scribe / Browser Speech fallback)...');
-
-    // Start Browser SpeechRecognition in parallel for instant live captions
-    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRec) {
-      try {
-        const rec = new SpeechRec();
-        rec.lang = 'en-IN';
-        rec.continuous = true;
-        rec.interimResults = true;
-        rec.onresult = (event: any) => {
-          let combined = '';
-          for (let i = 0; i < event.results.length; i++) {
-            combined += event.results[i][0].transcript;
-          }
-          setTranscript(combined.trim());
-        };
-        rec.start();
-        speechRecRef.current = rec;
-      } catch {
-        // Fallback handled on stop
-      }
-    }
+    setVoiceStatus('Recording for ElevenLabs transcription…');
 
     // Record audio buffer for ElevenLabs STT (RAM-only, discarded after transcription)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (captureVersion.current !== version) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       const mr = new MediaRecorder(stream);
       chunksRef.current = [];
       mr.ondataavailable = (e) => {
@@ -199,32 +192,27 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
       };
       mr.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const blob = new Blob(chunksRef.current, { type: mr.mimeType || 'audio/webm' });
         chunksRef.current = []; // Immediately discard audio chunks from RAM
         try {
           setVoiceStatus('Transcribing via ElevenLabs Scribe STT...');
-          const text = await api.transcribeVoiceWithElevenLabs(blob, elevenKey);
+          const text = await api.transcribeVoiceWithElevenLabs(blob);
+          if (captureVersion.current !== version) return;
           setTranscript(text);
           const parsed = extractStructuredFromTranscript(text);
           applyParsedDraft(parsed);
           setVoiceStatus('Transcribed via ElevenLabs Scribe · Review & approve branch below');
           speakConfirmation(`Drafted ${parsed.branch_type} branch: ${parsed.title}`);
-        } catch {
-          // Use browser speech transcript if available
-          setTranscript((prev) => {
-            const finalTxt =
-              prev.trim() ||
-              'Why do I feel sluggish after lunch even when I sleep okay? Check lunch timing and afternoon steps.';
-            const parsed = extractStructuredFromTranscript(finalTxt);
-            applyParsedDraft(parsed);
-            setVoiceStatus('Transcript ready (browser fallback) · Review & approve branch below');
-            return finalTxt;
-          });
+        } catch (error) {
+          if (captureVersion.current === version) {
+            setVoiceStatus(error instanceof Error ? error.message : 'Transcription failed. Try again or type the branch.');
+          }
         }
       };
       mr.start();
       mediaRecorderRef.current = mr;
     } catch {
+      if (captureVersion.current !== version) return;
       setVoiceStatus('Mic permission unavailable — tap a Demo Voice Sample below to test');
       setIsRecording(false);
     }
@@ -232,20 +220,11 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
 
   const stopVoiceCapture = () => {
     setIsRecording(false);
-    if (speechRecRef.current) {
-      try {
-        speechRecRef.current.stop();
-      } catch {
-        // ignore
-      }
-      speechRecRef.current = null;
-    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
-    } else if (transcript.trim()) {
-      const parsed = extractStructuredFromTranscript(transcript);
-      applyParsedDraft(parsed);
-      setVoiceStatus('Parsed voice draft ready · Confirm to grow on graph');
+    } else {
+      captureVersion.current += 1;
+      setVoiceStatus('Recording cancelled.');
     }
   };
 
@@ -253,7 +232,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
     setIsRecording(false);
     setTranscript(preset.transcript);
     applyParsedDraft(preset.parsed);
-    setVoiceStatus('ElevenLabs Voice Draft Ready · Confirm below to grow on your graph');
+    setVoiceStatus('Sample voice draft ready · Review before creating the branch');
     speakConfirmation(`Drafted ${preset.parsed.branch_type} branch: ${preset.parsed.title}`);
   };
 
@@ -357,37 +336,17 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
                 <Volume2 className="w-3.5 h-3.5" />
                 ELEVENLABS VOICE BRANCH CAPTURE
               </span>
-              <button
-                type="button"
-                onClick={() => setShowKeyBox((v) => !v)}
-                className="inline-flex items-center gap-1 font-mono text-[9.5px] text-t3 hover:text-t1"
-              >
-                <KeyRound className="w-3 h-3" />
-                {elevenKey ? 'API key set' : 'Optional API key'}
-              </button>
             </div>
-
-            {showKeyBox && (
-              <div className="flex items-center gap-2">
-                <input
-                  type="password"
-                  value={elevenKey}
-                  onChange={(e) => {
-                    setElevenKey(e.target.value);
-                    localStorage.setItem('elevenlabs_api_key', e.target.value);
-                  }}
-                  placeholder="Paste ElevenLabs xi-api-key (stays in browser only)"
-                  className="flex-1 px-3 py-1.5 rounded-lg font-mono text-[11px] text-t1 bg-s1 border focus:outline-none"
-                  style={{ borderColor: 'var(--border)' }}
-                />
-              </div>
-            )}
+            <p className="text-[11px] text-t3">
+              Recording sends your clip to ElevenLabs for transcription. Use a demo sample or type to keep the input local.
+            </p>
 
             {/* Big Interactive Mic Button + Live Waveform */}
             <div className="flex flex-col items-center py-2">
               <button
                 type="button"
                 onClick={isRecording ? stopVoiceCapture : startVoiceCapture}
+                aria-label={isRecording ? 'Stop recording' : 'Record with ElevenLabs'}
                 className="w-16 h-16 rounded-full flex items-center justify-center transition-transform hover:scale-105"
                 style={{
                   backgroundColor: isRecording ? 'var(--change)' : 'var(--trunk)',
@@ -409,6 +368,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
                     key={p.label}
                     type="button"
                     onClick={() => runVoicePreset(p)}
+                    disabled={isRecording}
                     className="px-2.5 py-1 rounded-full font-mono text-[10px] text-t2 hover:text-t1 transition-colors"
                     style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border)' }}
                   >

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { synthesizeWithElevenLabs } from '../../api';
 import { readAskAudit } from '../../askAudit';
-import type { AskResponse, BranchDetailResponse, BranchHypothesis } from '../../types';
+import type { AskResponse, BranchAction, BranchDetailResponse, BranchHypothesis } from '../../types';
 
 interface InvestigationPanelProps {
   branch: BranchDetailResponse | null;
@@ -25,6 +25,8 @@ interface InvestigationPanelProps {
   onClearAsk: () => void;
   onOpenRecord: (recordId: string, tab?: 'raw' | 'ai') => void;
   onLockExperiment: (expId: string) => void;
+  onBranchTransition: (id: string, action: BranchAction, resolution?: string) => Promise<void>;
+  resolution: string | null;
 }
 
 const ConfidenceRing: React.FC<{ value: number; rank: number }> = ({ value, rank }) => {
@@ -192,8 +194,21 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   onClearAsk,
   onOpenRecord,
   onLockExperiment,
+  onBranchTransition,
+  resolution,
 }) => {
   const [speakingSummary, setSpeakingSummary] = useState(false);
+  const [action, setAction] = useState<BranchAction | null>(null);
+  const [resolutionNote, setResolutionNote] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [closing, setClosing] = useState(false);
+
+  useEffect(() => {
+    setAction(null);
+    setResolutionNote('');
+    setActionError('');
+  }, [branch?.id]);
+
 
   // 1. RED FLAG SAFETY SCREEN (blocks AI output completely)
   if (askResult?.red_flag) {
@@ -378,8 +393,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
       : `Investigation: ${branch.title}. Not enough data yet.`;
     setSpeakingSummary(true);
     try {
-      const key = localStorage.getItem('elevenlabs_api_key') ?? undefined;
-      const url = await synthesizeWithElevenLabs(spoken, key);
+      const url = await synthesizeWithElevenLabs(spoken);
       const audio = new Audio(url);
       audio.onended = () => setSpeakingSummary(false);
       await audio.play();
@@ -397,6 +411,21 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   };
 
   // 3. STANDARD INVESTIGATION DETAIL PANEL (Matches Screenshot 02)
+  const confirmTransition = async () => {
+    if (!action || closing) return;
+    setClosing(true);
+    setActionError('');
+    try {
+      await onBranchTransition(branch.id, action, action === 'resolve' ? resolutionNote.trim() : undefined);
+      setAction(null);
+      setResolutionNote('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not close this branch.');
+    } finally {
+      setClosing(false);
+    }
+  };
+
   return (
     <aside
       className="w-[448px] shrink-0 h-full overflow-y-auto flex flex-col"
@@ -439,11 +468,63 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           }}
         >
           <span className="w-1.5 h-1.5 rounded-full bg-current" />
-          {branch.status === 'open' ? 'Open' : 'Concluded'}
+          {branch.status === 'open' ? 'Open' : workspace ? 'Resolved' : 'Concluded'}
         </span>
       </div>
 
       <div className="p-4 space-y-4">
+        {workspace && resolution && (
+          <div className="rounded-xl p-3.5" style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border)' }}>
+            <h3 className="text-[12px] font-semibold text-ok">Resolution on the main timeline</h3>
+            <p className="mt-1 break-words text-[12px] text-t1">{resolution}</p>
+          </div>
+        )}
+
+        {workspace && branch.status === 'open' && (
+          <section className="space-y-2 rounded-xl p-3.5" style={{ border: '1px solid var(--border)' }}>
+            {action ? (
+              <>
+                {action === 'resolve' ? (
+                  <label className="block space-y-1 text-[12px] font-semibold text-t1">
+                    Resolution note
+                    <textarea
+                      value={resolutionNote}
+                      onChange={(event) => setResolutionNote(event.target.value)}
+                      maxLength={450}
+                      rows={3}
+                      placeholder="What did you learn, or why are you closing this?"
+                      className="w-full rounded-lg border border-border bg-bg p-2 text-[12px] text-t1"
+                    />
+                  </label>
+                ) : (
+                  <p className="text-[12px] text-t2">Remove this branch from the live graph and keep it in History.</p>
+                )}
+                {actionError && <p role="alert" className="text-[12px] text-change">{actionError}</p>}
+                <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+                  <button type="button" onClick={confirmTransition}
+                    disabled={closing || (action === 'resolve' && !resolutionNote.trim())}
+                    className="rounded-lg bg-s2 px-3 py-1.5 text-branchOpen disabled:opacity-40">
+                    {closing ? 'Saving…' : action === 'resolve' ? 'Save to main timeline' : 'Confirm dissolve'}
+                  </button>
+                  <button type="button" onClick={() => setAction(null)} disabled={closing}
+                    className="rounded-lg px-3 py-1.5 text-t2">Cancel</button>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+                <button type="button" onClick={() => setAction('resolve')}
+                  className="rounded-lg bg-s2 px-3 py-1.5 text-branchOpen">Resolve branch</button>
+                <button type="button" onClick={() => setAction('dissolve')}
+                  className="rounded-lg bg-s2 px-3 py-1.5 text-t2">Dissolve branch</button>
+              </div>
+            )}
+          </section>
+        )}
+
+        {workspace && !branch.hypotheses.length && (
+          <p className="text-[12px] text-t2">This branch has no suggested factors. Link a measured outcome or add a specific factor when creating an investigation.</p>
+        )}
+
         {/* Triggering Change Event Banner */}
         {branch.change_event && (
           <div
@@ -481,7 +562,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
                 }}
               >
                 <Volume2 className="w-3 h-3" />
-                <span>{speakingSummary ? 'Speaking…' : 'Listen (11Labs)'}</span>
+                <span>{speakingSummary ? 'Speaking…' : 'Listen with ElevenLabs'}</span>
               </button>
               <button
                 type="button"
