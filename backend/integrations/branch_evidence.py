@@ -24,7 +24,7 @@ LABEL_ALIASES = {
 DEMO_OUTCOMES = {"headache": "br_1", "sleep_min": "br_0"}
 
 
-def _outcome(payload):
+def workspace_outcome(payload):
     chosen = payload.get("outcome", "auto")
     if chosen != "auto":
         return chosen
@@ -56,11 +56,13 @@ def _snapshot(conn, metric_key, end):
 
 
 def workspace_hypotheses(conn, payload, clock):
-    outcome = _outcome(payload)
+    outcome = workspace_outcome(payload)
     metrics = payload["metrics"]
     factors = [metric for metric in metrics if metric != outcome]
-    labels = payload["hypotheses"]
-    if not labels or labels == LEGACY_DEFAULT:
+    draft_checks = {draft["label"]: draft["test"] for draft in payload.get("ai_drafts", [])}
+    manual_labels = [] if payload["hypotheses"] == LEGACY_DEFAULT else payload["hypotheses"]
+    labels = list(dict.fromkeys([*draft_checks, *manual_labels]))
+    if not labels:
         if payload["branch_type"] == "habit":
             labels = [f"Track {METRICS[metric].title.lower()}" for metric in metrics[:3]]
         elif outcome != "untracked":
@@ -105,7 +107,7 @@ def workspace_hypotheses(conn, payload, clock):
         if result is not None:
             hypotheses.append({
                 "label": label, "confidence": result["confidence"], "claims": result["claims"],
-                "test": "Track the same factor and outcome together to see whether this pattern repeats.",
+                "test": draft_checks.get(label, "Track the same factor and outcome together to see whether this pattern repeats."),
             })
             continue
         if outcome == "afternoon_energy":
@@ -118,7 +120,9 @@ def workspace_hypotheses(conn, payload, clock):
         else:
             guidance = "Choose a logged outcome and a measurable factor to test this draft."
         hypotheses.append({
-            "label": label, "claims": _snapshot(conn, metric, end) if metric else [], "test": guidance,
+            "label": label, "claims": _snapshot(conn, metric, end) if metric else [],
+            "test": draft_checks.get(label, guidance),
         })
-    hypotheses.sort(key=lambda item: item.get("confidence", -1), reverse=True)
+    if not draft_checks:
+        hypotheses.sort(key=lambda item: item.get("confidence", -1), reverse=True)
     return [{"rank": rank, **item} for rank, item in enumerate(hypotheses, 1)]

@@ -104,6 +104,12 @@ export interface BranchDetailResponse {
   evidence: EvidenceRow[];
 }
 
+export interface BranchDraftContext {
+  can_generate: boolean;
+  sent_to_ai: string;
+  related_resolutions: Array<{ id: string; title: string; date: string; note: string }>;
+}
+
 export type BranchAction = 'resolve' | 'dissolve';
 
 export interface WorkspaceHistoryEntry {
@@ -125,6 +131,7 @@ export interface CreateBranchInput {
   hypotheses: string[];
   created_via: 'manual' | 'elevenlabs_voice';
   voice_transcript?: string;
+  generate_drafts?: boolean;
 }
 
 export interface RecordDetailResponse {

@@ -12,11 +12,13 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
+from backend.ai.gemini import GeminiUnavailable
 from backend.auth.dependencies import CurrentUser, get_current_user
 from backend.data.metrics import METRICS
 from backend.data.queries import build_record
 from backend.data.store import store
-from backend.integrations.branch_evidence import workspace_hypotheses
+from backend.integrations.branch_drafts import DraftsUnavailable, can_generate, generate_workspace_drafts
+from backend.integrations.branch_evidence import workspace_hypotheses, workspace_outcome
 from backend.routes.branches import get_branch as demo_branch
 from backend.routes.experiments import AdvanceBody, advance as advance_demo, reset as reset_demo
 from backend.routes.graph import get_graph as demo_graph
@@ -37,6 +39,7 @@ class BranchInput(BaseModel):
     hypotheses: list[Label] = Field(max_length=20)
     created_via: Literal["manual", "elevenlabs_voice"]
     voice_transcript: str | None = Field(default=None, max_length=16000, exclude=True)
+    generate_drafts: bool = Field(default=False, exclude=True)
 
     @field_validator("metrics")
     @classmethod
@@ -141,6 +144,12 @@ def _with_workspace(graph: dict, user_id: str) -> dict:
 def create_branch(body: BranchInput, user: User, response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store"
     payload = body.model_dump(mode="json")
+    draft_error = None
+    if body.generate_drafts and not body.hypotheses and can_generate(payload):
+        try:
+            payload = generate_workspace_drafts(payload, store.clock)
+        except (DraftsUnavailable, GeminiUnavailable) as exc:
+            draft_error = str(exc)
     branch_id = f"br_custom_{uuid4().hex}"
     detail = _detail(branch_id, payload)
     with closing(_connect()) as conn, conn:
@@ -155,6 +164,7 @@ def create_branch(body: BranchInput, user: User, response: Response) -> dict:
     return {
         "branch": _summary(branch_id, payload, total + 2),
         "detail": detail,
+        **({"draft_error": draft_error} if draft_error else {}),
     }
 
 
@@ -177,6 +187,60 @@ def _history(user_id: str) -> list[dict]:
          "closed_date": payload.get("closed_date"), "resolution": payload.get("resolution")}
         for branch_id, payload in _workspace_entries(user_id)
     ]
+
+
+def _draft_context(user_id: str, branch_id: str, payload: dict) -> dict:
+    outcome = workspace_outcome(payload)
+    related = [
+        {"id": other_id, "title": other["title"], "date": other["closed_date"], "note": other["resolution"]}
+        for other_id, other in _workspace_entries(user_id)
+        if other_id != branch_id and other.get("lifecycle") == "resolved"
+        and outcome != "untracked" and workspace_outcome(other) == outcome
+    ]
+    related.sort(key=lambda item: item["date"], reverse=True)
+    return {
+        "can_generate": can_generate(payload),
+        "sent_to_ai": payload.get("draft_sent_to_ai", ""),
+        "related_resolutions": related[:3],
+    }
+
+
+@router.get("/branches/{branch_id}/drafts")
+def branch_draft_context(branch_id: str, user: User, response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    payload = workspace_branch(user.id, branch_id)
+    if payload is None:
+        raise HTTPException(404, "Workspace branch not found.")
+    return _draft_context(user.id, branch_id, payload)
+
+
+@router.post("/branches/{branch_id}/drafts")
+def regenerate_branch_drafts(branch_id: str, user: User, response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    original = workspace_branch(user.id, branch_id)
+    if original is None:
+        raise HTTPException(404, "Workspace branch not found.")
+    if original.get("lifecycle", "open") != "open":
+        raise HTTPException(409, "This branch is already closed.")
+    try:
+        payload = generate_workspace_drafts(original, store.clock)
+    except DraftsUnavailable as exc:
+        raise HTTPException(422, str(exc)) from None
+    except GeminiUnavailable as exc:
+        raise HTTPException(503, str(exc)) from None
+
+    with closing(_connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT payload FROM workspace_branches WHERE id = ? AND user_id = ?", (branch_id, user.id),
+        ).fetchone()
+        if not row or json.loads(row["payload"]) != original:
+            raise HTTPException(409, "This branch changed while generating drafts. Refresh and try again.")
+        conn.execute(
+            "UPDATE workspace_branches SET payload = ? WHERE id = ? AND user_id = ?",
+            (json.dumps(payload, ensure_ascii=False), branch_id, user.id),
+        )
+    return {"detail": _detail(branch_id, payload), "context": _draft_context(user.id, branch_id, payload)}
 
 
 @router.post("/branches/{branch_id}/transition")

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -13,9 +13,9 @@ import {
   Volume2,
   X,
 } from 'lucide-react';
-import { synthesizeWithElevenLabs } from '../../api';
+import { api, synthesizeWithElevenLabs } from '../../api';
 import { readAskAudit } from '../../askAudit';
-import type { AskResponse, BranchAction, BranchDetailResponse, BranchHypothesis } from '../../types';
+import type { AskResponse, BranchAction, BranchDetailResponse, BranchDraftContext, BranchHypothesis } from '../../types';
 
 interface InvestigationPanelProps {
   branch: BranchDetailResponse | null;
@@ -27,6 +27,7 @@ interface InvestigationPanelProps {
   onLockExperiment: (expId: string) => void;
   onBranchTransition: (id: string, action: BranchAction, resolution?: string) => Promise<void>;
   resolution: string | null;
+  onGenerateDrafts: (id: string) => Promise<BranchDraftContext>;
 }
 
 const ConfidenceRing: React.FC<{ value: number; rank: number }> = ({ value, rank }) => {
@@ -175,7 +176,7 @@ const HypothesisCard: React.FC<{
             </p>
           )}
           {hyp.test && <div
-            className="rounded-lg px-2.5 py-1.5 font-mono text-[10.5px] text-t2"
+            className="whitespace-pre-line rounded-lg px-2.5 py-1.5 font-mono text-[10.5px] text-t2"
             style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
           >
             {testLabel}: {hyp.test}
@@ -196,6 +197,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   onLockExperiment,
   onBranchTransition,
   resolution,
+  onGenerateDrafts,
 }) => {
   const [speakingSummary, setSpeakingSummary] = useState(false);
   const [action, setAction] = useState<BranchAction | null>(null);
@@ -203,6 +205,25 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   const [actionError, setActionError] = useState('');
   const [closing, setClosing] = useState(false);
 
+  const [draftContext, setDraftContext] = useState<BranchDraftContext | null>(null);
+  const [draftRequestId, setDraftRequestId] = useState<string | null>(null);
+  const [draftError, setDraftError] = useState<{ id: string; message: string } | null>(null);
+
+  const workspaceBranchId = branch?.id.startsWith('br_custom_') ? branch.id : null;
+  const currentDraftBranch = useRef(workspaceBranchId);
+  currentDraftBranch.current = workspaceBranchId;
+  useEffect(() => {
+    let current = true;
+    setDraftContext(null);
+    if (workspaceBranchId) {
+      void api.getBranchDraftContext(workspaceBranchId).then((context) => {
+        if (current) setDraftContext(context);
+      }).catch(() => {
+        if (current) setDraftError({ id: workspaceBranchId, message: 'Could not load branch drafts.' });
+      });
+    }
+    return () => { current = false; };
+  }, [workspaceBranchId, branch?.status]);
   useEffect(() => {
     setAction(null);
     setResolutionNote('');
@@ -411,6 +432,20 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   };
 
   // 3. STANDARD INVESTIGATION DETAIL PANEL (Matches Screenshot 02)
+  const generateDrafts = async () => {
+    const id = branch.id;
+    setDraftError(null);
+    setDraftRequestId(id);
+    try {
+      const context = await onGenerateDrafts(id);
+      if (currentDraftBranch.current === id) setDraftContext(context);
+    } catch (error) {
+      setDraftError({ id, message: error instanceof Error ? error.message : 'Could not generate Gemini drafts.' });
+    } finally {
+      setDraftRequestId((current) => current === id ? null : current);
+    }
+  };
+
   const confirmTransition = async () => {
     if (!action || closing) return;
     setClosing(true);
@@ -521,8 +556,43 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           </section>
         )}
 
-        {workspace && !branch.hypotheses.length && (
-          <p className="text-[12px] text-t2">This branch has no suggested factors. Link a measured outcome or add a specific factor when creating an investigation.</p>
+        {workspace && draftContext && (draftContext.can_generate || draftContext.sent_to_ai) && (
+          <section className="space-y-2 rounded-xl border border-border p-3.5">
+            <h3 className="text-[12px] font-semibold text-t1">Gemini drafts</h3>
+            <p className="text-[11.5px] leading-relaxed text-t2">
+              Suggested factors and possible test results use synthetic demo evidence.
+            </p>
+            {draftContext.can_generate && branch.status === 'open' && (
+              <button type="button" onClick={generateDrafts} disabled={draftRequestId === branch.id}
+                className="rounded-lg bg-s2 px-3 py-1.5 text-[11px] font-semibold text-branchOpen disabled:opacity-40">
+                {draftRequestId === branch.id ? 'Generating drafts…' :
+                  draftContext.sent_to_ai ? 'Regenerate Gemini drafts' : 'Generate Gemini drafts'}
+              </button>
+            )}
+            {draftContext.sent_to_ai && (
+              <details className="rounded-lg border border-border px-3 py-2 text-[11px] text-t2">
+                <summary className="cursor-pointer font-semibold">View Gemini draft request</summary>
+                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {draftContext.sent_to_ai}
+                </pre>
+              </details>
+            )}
+          </section>
+        )}
+        {draftError?.id === branch.id && <p role="alert" className="text-[12px] text-change">{draftError.message}</p>}
+        {workspace && !!draftContext?.related_resolutions.length && (
+          <section className="space-y-2 rounded-xl border border-border p-3.5">
+            <h3 className="text-[12px] font-semibold text-t1">Related local resolutions</h3>
+            {draftContext.related_resolutions.map(({ id, title, date, note }) => (
+              <div key={id} className="text-[11.5px] leading-relaxed text-t2">
+                <p className="font-semibold text-t1">{title} · {date}</p>
+                <p className="break-words">{note}</p>
+              </div>
+            ))}
+          </section>
+        )}
+        {workspace && !branch.hypotheses.length && !draftContext?.can_generate && (
+          <p className="text-[12px] text-t2">This branch has no suggested factors. Try a tracked demo outcome, such as headache days or short sleep.</p>
         )}
 
         {/* Triggering Change Event Banner */}

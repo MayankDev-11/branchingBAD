@@ -2,6 +2,7 @@
 
 import json
 import os
+from typing import Literal
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,7 +16,6 @@ SYSTEM = (
 )
 
 
-
 class GeminiUnavailable(RuntimeError):
     """A sanitized failure that can be rendered without exposing provider details."""
 
@@ -25,12 +25,39 @@ class Selection(BaseModel):
     ranks: list[int] = Field(max_length=3)
 
 
+class Draft(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    rank: int = Field(ge=1)
+    approach: Literal["compare_logs", "track_prospectively"]
+
+
+class DraftSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    drafts: list[Draft] = Field(max_length=3)
+
+
 def select_ranks(topic: str, hypotheses: list[dict]) -> tuple[list[int], str]:
+    selection, audit = _request(topic, hypotheses, SYSTEM, Selection)
+    return selection.ranks, audit
+
+
+def propose_drafts(topic: str, hypotheses: list[dict]) -> tuple[list[Draft], str]:
+    system = (
+        "Draft up to three distinct investigation sub-branches for this fictional demo. "
+        "Choose each factor by its supplied rank. Choose compare_logs when there are useful comparisons "
+        "in the existing logs, or track_prospectively when more observations would clarify the pattern. "
+        "The choices are hypotheses to test. Do not infer causation or present an outcome as established."
+    )
+    selection, audit = _request(topic, hypotheses, system, DraftSelection)
+    return selection.drafts, audit
+
+
+def _request(topic, hypotheses, system, schema):
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
         raise GeminiUnavailable("Set GEMINI_API_KEY for the Gemini demo.")
     payload = {
-        "systemInstruction": {"parts": [{"text": SYSTEM}]},
+        "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": json.dumps({
             "topic": topic,
             "hypotheses": [
@@ -42,7 +69,7 @@ def select_ranks(topic: str, hypotheses: list[dict]) -> tuple[list[int], str]:
             "temperature": 0,
             "maxOutputTokens": 1024,
             "responseMimeType": "application/json",
-            "responseJsonSchema": Selection.model_json_schema(),
+            "responseJsonSchema": schema.model_json_schema(),
         },
         "safetySettings": [
             {"category": category, "threshold": "BLOCK_MEDIUM_AND_ABOVE"}
@@ -68,7 +95,7 @@ def select_ranks(topic: str, hypotheses: list[dict]) -> tuple[list[int], str]:
             part["text"] for part in candidate["content"]["parts"]
             if "text" in part and not part.get("thought")
         )
-        selection = Selection.model_validate_json(output)
+        selection = schema.model_validate_json(output)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 429:
             raise GeminiUnavailable("Gemini quota is exhausted. Try again later.") from None
@@ -77,4 +104,4 @@ def select_ranks(topic: str, hypotheses: list[dict]) -> tuple[list[int], str]:
         raise GeminiUnavailable("Gemini is temporarily unavailable.") from None
     except (httpx.RequestError, ValueError, KeyError, IndexError, TypeError):
         raise GeminiUnavailable("Gemini returned no usable demo answer.") from None
-    return selection.ranks, audit
+    return selection, audit

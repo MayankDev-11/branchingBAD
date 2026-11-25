@@ -73,3 +73,11 @@ ElevenLabs narration and microphone transcription use the server-side
 audio brief keeps its browser speech fallback. Voice recordings are sent to
 ElevenLabs only when using microphone transcription. The raw recording is not
 retained by the app. [ElevenLabs transcription](https://elevenlabs.io/docs/api-reference/speech-to-text/convert) · [Narration](https://elevenlabs.io/docs/api-reference/text-to-speech/convert)
+
+For tracked investigation outcomes, leaving possible factors blank lets Gemini
+draft sub-branches from matching synthetic readings. Existing branches can use
+**Generate Gemini drafts**. Each draft describes what would support or weaken
+the hypothesis and links the evidence behind any computed score. Branch titles,
+private resolution notes, raw records and imported data stay local. Related
+resolutions are retrieved locally for the signed-in account. The exact outbound
+request is available from the branch's **View Gemini draft request** disclosure.

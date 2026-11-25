@@ -9,6 +9,7 @@ import type {
   AskResponse,
   BranchAction,
   BranchDetailResponse,
+  BranchDraftContext,
   CreateBranchInput,
   ExperimentInfo,
   GraphBranch,
@@ -203,7 +204,7 @@ export const api = {
     return res.json();
   },
 
-  async createBranch(input: CreateBranchInput): Promise<{ branch: GraphBranch; detail: BranchDetailResponse }> {
+  async createBranch(input: CreateBranchInput): Promise<{ branch: GraphBranch; detail: BranchDetailResponse; draft_error?: string }> {
     if (USE_MOCK) {
       await delay(280);
       const id = `br_custom_${customBranches.length + 2}`;
@@ -298,6 +299,23 @@ export const api = {
       body: JSON.stringify(input),
     });
     if (!res.ok) throw new Error(`Create branch failed (${res.status})`);
+    return res.json();
+  },
+
+  async getBranchDraftContext(id: string): Promise<BranchDraftContext> {
+    const res = await fetch(`${API_BASE}/api/branches/${encodeURIComponent(id)}/drafts`, { credentials: 'include' });
+    if (!res.ok) throw new Error('Could not load Gemini drafts.');
+    return res.json();
+  },
+
+  async generateBranchDrafts(id: string): Promise<{ detail: BranchDetailResponse; context: BranchDraftContext }> {
+    const res = await fetch(`${API_BASE}/api/branches/${encodeURIComponent(id)}/drafts`, {
+      method: 'POST', credentials: 'include',
+    });
+    if (!res.ok) {
+      const failure = await res.json().catch(() => ({}));
+      throw new Error(typeof failure.detail === 'string' ? failure.detail : 'Could not generate Gemini drafts.');
+    }
     return res.json();
   },
 

@@ -252,6 +252,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
         metrics: selectedMetrics,
         outcome,
         hypotheses: hyps,
+        generate_drafts: branchType === 'investigation' && hyps.length === 0,
         created_via: mode === 'voice' ? 'elevenlabs_voice' : 'manual',
         voice_transcript: mode === 'voice' ? transcript : undefined,
       });
@@ -463,7 +464,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
             </label>
             <input
               type="text"
-              placeholder="Leave blank to use the linked metrics"
+              placeholder="Leave blank for Gemini drafts on a supported outcome"
               value={hypInput}
               onChange={(e) => setHypInput(e.target.value)}
               className="w-full px-3.5 py-2 rounded-xl font-mono text-[11.5px] text-t2 focus:outline-none"
@@ -547,7 +548,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
               style={{ backgroundColor: 'var(--trunk)', color: 'var(--btn-ink)' }}
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>{submitting ? 'Growing branch...' : 'Approve & Grow Branch'}</span>
+              <span>{submitting ? 'Saving branch and checking evidence…' : 'Approve & Grow Branch'}</span>
             </button>
           </div>
         </form>

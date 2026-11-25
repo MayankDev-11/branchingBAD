@@ -125,3 +125,67 @@ def test_workspace_transitions_keep_history_without_fabricating_factors(monkeypa
         assert client.get("/api/branches/history").json() == []
         assert client.post(first_action, json={"action": "dissolve"}).status_code == 404
         assert item not in client.get("/api/graph").json()["knowledge"]
+
+
+def test_gemini_drafts_use_synthetic_evidence_and_keep_resolution_memory_local(monkeypatch, tmp_path, fresh_store):
+    import json
+    from unittest.mock import Mock
+
+    import httpx
+
+    from backend.ai import gemini
+
+    monkeypatch.setenv("ROOTTRACE_WORKSPACE_DB", str(tmp_path / "workspace.db"))
+    monkeypatch.setenv("ROOTTRACE_AI_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "mock-key")
+
+    def reply(url, **kwargs):
+        sent = json.loads(kwargs["content"])
+        candidates = json.loads(sent["contents"][0]["parts"][0]["text"])["hypotheses"]
+        choices = [{"rank": item["rank"], "approach": "compare_logs"} for item in candidates]
+        return httpx.Response(200, request=httpx.Request("POST", url), json={
+            "candidates": [{"finishReason": "STOP", "content": {"parts": [
+                {"text": json.dumps({"drafts": choices})},
+            ]}}],
+        })
+
+    post = Mock(side_effect=reply)
+    monkeypatch.setattr(gemini.httpx, "post", post)
+    with TestClient(app) as client:
+        client.post("/api/auth/demo").raise_for_status()
+        base = {**DRAFT, "branch_type": "investigation", "metrics": [], "hypotheses": []}
+        old = client.post("/api/branches", json={**base, "title": "Old headache question"}).json()["detail"]
+        client.post(f"/api/branches/{old['id']}/transition", json={
+            "action": "resolve", "resolution": "Keep this private note locally.",
+        }).raise_for_status()
+
+        first = client.post("/api/branches", json={
+            **base, "title": "Private title headaches 9876543210", "generate_drafts": True,
+        })
+        assert first.status_code == 201, first.text
+        detail = first.json()["detail"]
+        assert {item["label"] for item in detail["hypotheses"]} == {
+            "Short sleep", "Low water intake", "Late screen time",
+        }
+        assert detail["experiment"] is None
+        assert all("Would support" in item["test"] and "Would weaken" in item["test"]
+                   for item in detail["hypotheses"])
+        assert all(item["claims"] for item in detail["hypotheses"])
+        assert detail["evidence"]
+        context = client.get(f"/api/branches/{detail['id']}/drafts").json()
+        assert context["related_resolutions"][0]["note"] == "Keep this private note locally."
+        assert context["sent_to_ai"] == post.call_args.kwargs["content"].decode()
+        for private in ("Private title", "9876543210", "Keep this private note", "mock-key", "source_file", "device"):
+            assert private not in context["sent_to_ai"]
+        assert client.get(f"/api/branches/{detail['id']}").json() == detail
+
+        empty = client.post("/api/branches", json={**base, "title": "Headaches"}).json()["detail"]
+        assert empty["hypotheses"] == []
+        generated = client.post(f"/api/branches/{empty['id']}/drafts")
+        assert generated.status_code == 200, generated.text
+        assert len(generated.json()["detail"]["hypotheses"]) == 3
+
+        for title in ("Plain title", "Chest pain and headaches"):
+            untouched = client.post("/api/branches", json={**base, "title": title, "generate_drafts": True})
+            assert untouched.json()["detail"]["hypotheses"] == []
+        assert post.call_count == 2

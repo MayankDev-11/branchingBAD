@@ -169,7 +169,8 @@ export const App: React.FC = () => {
   };
 
   const handleCreateBranch = async (input: CreateBranchInput) => {
-    const { branch, detail } = await api.createBranch(input);
+    const { branch, detail, draft_error } = await api.createBranch(input);
+    setErrorMsg(draft_error ? `Branch saved. ${draft_error}` : null);
     const updatedGraph = await api.getGraph();
     setGraph(updatedGraph);
     setBranchDetailsMap((prev) => ({ ...prev, [branch.id]: detail }));
@@ -181,6 +182,13 @@ export const App: React.FC = () => {
     void api.getBranchHistory().then(setWorkspaceHistory).catch(() => {
       setErrorMsg('Branch saved. Refresh if it does not appear in History.');
     });
+  };
+
+  const handleGenerateBranchDrafts = async (id: string) => {
+    const { detail, context } = await api.generateBranchDrafts(id);
+    setBranchDetailsMap((prev) => ({ ...prev, [id]: detail }));
+    setSelectedBranch((prev) => prev?.id === id ? detail : prev);
+    return context;
   };
 
   const handleBranchTransition = async (id: string, action: BranchAction, resolution?: string) => {
@@ -337,6 +345,7 @@ export const App: React.FC = () => {
                           onOpenRecord={handleOpenRecord}
                           onLockExperiment={handleLockExperiment}
                           onBranchTransition={handleBranchTransition}
+                          onGenerateDrafts={handleGenerateBranchDrafts}
                           resolution={workspaceHistory.find(({ id }) => id === selectedBranch?.id)?.resolution ?? null}
                         />
                       </motion.div>
