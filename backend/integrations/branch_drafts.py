@@ -6,14 +6,25 @@ from contextlib import closing
 from dotenv import load_dotenv
 
 from backend.ai.gemini import GeminiUnavailable, propose_drafts
+from backend.ai.knowledge_catalog import DEMO_OUTCOMES, TOPICS, URINARY, prospective_test
 from backend.data import generate_demo
 from backend.data.db import connect
-from backend.integrations.branch_evidence import DEMO_OUTCOMES, FACTOR_LABELS, workspace_hypotheses, workspace_outcome
-from backend.privacy.questions import is_red_flag
+from backend.data.metrics import METRICS
+from backend.integrations.branch_evidence import (
+    FACTOR_LABELS,
+    workspace_hypotheses,
+    workspace_metrics,
+    workspace_outcome,
+)
 
 OUTCOME_TOPICS = {
     "headache": ("Factors associated with headaches in the fictional demo", "headache days"),
     "sleep_min": ("Factors associated with short sleep in the fictional demo", "short nights"),
+    "afternoon_energy": (
+        "Possible factors to investigate for an energy dip after lunch in the fictional demo. "
+        "The demo has no lunch records or afternoon energy ratings. Suggest prospective tracking.",
+        "low-energy afternoons",
+    ),
 }
 
 
@@ -23,12 +34,13 @@ class DraftsUnavailable(ValueError):
 
 def can_generate(payload):
     load_dotenv()
+    outcome = workspace_outcome(payload)
     return (
         os.getenv("ROOTTRACE_AI_PROVIDER", "bedrock").strip().lower() == "gemini"
         and payload["branch_type"] == "investigation"
         and payload.get("lifecycle", "open") == "open"
-        and workspace_outcome(payload) in OUTCOME_TOPICS
-        and not is_red_flag(payload["title"])
+        and outcome in TOPICS and outcome != URINARY
+        and any(metric != outcome for metric in workspace_metrics(payload, outcome))
     )
 
 
@@ -47,32 +59,34 @@ def _possible_outcomes(approach, exposure, outcome):
 
 def generate_workspace_drafts(payload, clock):
     if not can_generate(payload):
-        raise DraftsUnavailable("Choose a tracked demo outcome such as headache days or short sleep.")
+        raise DraftsUnavailable("Gemini drafts need an open investigation with supported linked factors.")
 
     outcome = workspace_outcome(payload)
-    topic, outcome_label = OUTCOME_TOPICS[outcome]
+    topic, outcome_label = OUTCOME_TOPICS.get(outcome, (
+        f"Plan tests for {TOPICS[outcome].label.lower()} in the fictional demo. "
+        "Treat linked readings as context and suggest prospective tracking.",
+        TOPICS[outcome].label.lower(),
+    ))
     with closing(connect(":memory:")) as conn:
         generate_demo.build(conn)
-        definitions = {
-            row["metric"]: row for row in conn.execute(
-                "SELECT * FROM hypotheses WHERE branch_id = ? ORDER BY id", (DEMO_OUTCOMES[outcome],)
-            )
-        }
-        chosen_metrics = [metric for metric in payload["metrics"] if metric != outcome]
-        metrics = [metric for metric in (chosen_metrics or definitions) if metric in definitions]
+        metrics = [metric for metric in workspace_metrics(payload, outcome) if metric != outcome][:3]
+        definitions = {}
+        if outcome in DEMO_OUTCOMES:
+            definitions = {
+                row["metric"]: row for row in conn.execute(
+                    "SELECT * FROM hypotheses WHERE branch_id = ? ORDER BY id", (DEMO_OUTCOMES[outcome],)
+                )
+            }
         synthetic_branch = {
             "title": "", "branch_type": "investigation", "outcome": outcome,
             "metrics": metrics, "hypotheses": [], "start_date": payload["start_date"],
         }
-        by_label = {FACTOR_LABELS[metric]: metric for metric in metrics}
+        by_label = {FACTOR_LABELS.get(metric, METRICS[metric].title): metric for metric in metrics}
         candidates = []
         for item in workspace_hypotheses(conn, synthetic_branch, clock):
-            if not item["claims"]:
-                continue
-            metric = by_label[item["label"]]
             candidates.append({
                 "rank": item["rank"], "text": item["label"], "claims": item["claims"],
-                "metric": metric, "exposure": definitions[metric]["exposure_text"],
+                "metric": by_label[item["label"]], "scored": "confidence" in item,
             })
     if not candidates:
         raise DraftsUnavailable("No matching demo readings for the linked metrics and branch date.")
@@ -85,16 +99,23 @@ def generate_workspace_drafts(payload, clock):
         item = by_rank.get(proposal.rank)
         if item is None or item["metric"] in selected_metrics:
             continue
-        selected_metrics.append(item["metric"])
+        metric = item["metric"]
+        selected_metrics.append(metric)
         drafts.append({
             "label": item["text"],
-            "test": _possible_outcomes(proposal.approach, item["exposure"], outcome_label),
+            "test": (
+                _possible_outcomes(proposal.approach, definitions[metric]["exposure_text"], outcome_label)
+                if item["scored"] else prospective_test(outcome, METRICS[metric].title.lower())
+            ),
         })
     if not drafts:
         raise GeminiUnavailable("Gemini returned no matching drafts. Try again.")
+    linked_metrics = [*payload["metrics"], *selected_metrics]
+    if outcome in METRICS:
+        linked_metrics.append(outcome)
     return {
         **payload,
-        "metrics": list(dict.fromkeys([*payload["metrics"], *selected_metrics, outcome])),
+        "metrics": list(dict.fromkeys(linked_metrics)),
         "ai_drafts": drafts,
         "draft_sent_to_ai": audit,
     }

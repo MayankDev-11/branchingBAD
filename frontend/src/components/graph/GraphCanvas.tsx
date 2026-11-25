@@ -586,6 +586,10 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
     extraBranches.forEach((cb, idx) => {
       const detail = branchDetailsMap[cb.id];
       const factorCount = detail?.hypotheses.length;
+      const branchKind = cb.branch_type === 'habit' ? 'Habit' : 'Investigation';
+      const branchSummary = detail?.guidance ? 'Guidance' : factorCount === undefined
+        ? 'Workspace'
+        : `${factorCount} ${factorCount === 1 ? 'factor' : 'factors'}`;
       const side: -1 | 1 = idx % 2 === 0 ? -1 : 1;
       const startX = 1460 + idx * 240;
       const hubX = startX + 160;
@@ -606,7 +610,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
             status: cb.status,
             branchType: cb.branch_type,
             labelSide: side === -1 ? 'above' : 'below',
-            subtitle: `${cb.branch_type === 'habit' ? 'Habit' : 'Investigation'} · New · ${factorCount === undefined ? 'Workspace' : `${factorCount} ${factorCount === 1 ? 'factor' : 'factors'}`}`,
+            subtitle: `${branchKind} · New · ${branchSummary}`,
             isSelected: selectedBranchId === cb.id,
             onSelect: onSelectBranch,
           },

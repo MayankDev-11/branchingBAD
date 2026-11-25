@@ -29,7 +29,7 @@ These providers read their settings from the same local `.env`.
 | `BEDROCK_MODEL_ID` | India inference profile `in.anthropic.claude-haiku-4-5-20251001-v1:0` |
 | `BEDROCK_GUARDRAIL_ID` and `BEDROCK_GUARDRAIL_VERSION` | Required for Bedrock Ask. Use a guardrail configured with sensitive-information masking |
 | `ELEVENLABS_API_KEY` | Read server-side for weekly narration |
-| `ELEVENLABS_VOICE_ID` | Voice to use for weekly narration |
+| `ELEVENLABS_VOICE_ID` | Optional narration voice override. Defaults to the premade George voice |
 
 Configure the AWS credential chain with an identity that can invoke the selected Bedrock inference profile in `ap-south-1`. Presidio requires the local spaCy model before an Ask request can reach Bedrock. Weekly audio still uses ElevenLabs. The existing frontend audio brief can use the browser's built-in voice without an API key.
 
@@ -74,10 +74,18 @@ audio brief keeps its browser speech fallback. Voice recordings are sent to
 ElevenLabs only when using microphone transcription. The raw recording is not
 retained by the app. [ElevenLabs transcription](https://elevenlabs.io/docs/api-reference/speech-to-text/convert) · [Narration](https://elevenlabs.io/docs/api-reference/text-to-speech/convert)
 
-For tracked investigation outcomes, leaving possible factors blank lets Gemini
-draft sub-branches from matching synthetic readings. Existing branches can use
-**Generate Gemini drafts**. Each draft describes what would support or weaken
-the hypothesis and links the evidence behind any computed score. Branch titles,
-private resolution notes, raw records and imported data stay local. Related
-resolutions are retrieved locally for the signed-in account. The exact outbound
-request is available from the branch's **View Gemini draft request** disclosure.
+Leaving possible factors blank uses the local catalog for headache, sleep,
+bedtime, energy, mood, activity, water, caffeine, and screen-use investigations.
+The catalog prioritizes relevant tracked factors mentioned in the question.
+Existing branches can use **Generate Gemini drafts** to select from synthetic
+readings. Only supported headache and sleep comparisons with matched records get
+a score. Afternoon energy has no direct demo readings. A question about
+urination displays local guidance and skips draft generation.
+
+Resolving a branch adds its note to `workspace_knowledge` in the same SQLite
+workspace database. The first use backfills previously resolved branches.
+`GET /api/knowledge` lists entries for the signed-in account, newest first.
+Each entry has `id` (the branch ID), `topic`, `title`, `date`, and `note`.
+Related resolutions appear beside investigations about the same topic.
+Branch titles, resolution notes, raw records and imported data stay local.
+The exact outbound Gemini request is available under **View Gemini draft request**.

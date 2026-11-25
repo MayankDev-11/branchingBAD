@@ -17,6 +17,7 @@ from backend.data.store import store
 
 CACHE = Path(__file__).resolve().parents[2] / "data" / "uploads" / "weekly-audio"
 VOICE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
 AUDIO_ID = re.compile(r"[a-f0-9]{64}")
 CACHE_LOCK = Lock()
 METRICS = (
@@ -29,7 +30,9 @@ METRICS = (
 
 
 class AudioUnavailable(RuntimeError):
-    pass
+    def __init__(self, message: str, status_code: int = 502):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def report_lines() -> list[dict]:
@@ -62,6 +65,17 @@ def render_audio(voice: str, key: str, payload: dict) -> bytes:
             headers={"xi-api-key": key, "Accept": "audio/mpeg"}, json=payload, timeout=30,
         )
         response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status == 402:
+            raise AudioUnavailable("ElevenLabs requires payment for this voice or the account is out of credits.", 402) from None
+        if status in (401, 403):
+            raise AudioUnavailable("ElevenLabs rejected the API key or its Text to Speech permission.", 503) from None
+        if status == 404:
+            raise AudioUnavailable("ElevenLabs could not find the configured voice.", 503) from None
+        if status == 429:
+            raise AudioUnavailable("ElevenLabs is rate-limiting narration. Try again shortly.", 429) from None
+        raise AudioUnavailable("ElevenLabs could not generate narration.") from None
     except httpx.HTTPError as exc:
         raise AudioUnavailable("ElevenLabs narration is temporarily unavailable.") from exc
     if not response.content or not response.headers.get("content-type", "").startswith("audio/"):
@@ -72,7 +86,7 @@ def render_audio(voice: str, key: str, payload: dict) -> bytes:
 def weekly_report() -> dict:
     lines = report_lines()
     load_dotenv()
-    voice = os.environ.get("ELEVENLABS_VOICE_ID", "")
+    voice = os.environ.get("ELEVENLABS_VOICE_ID", "").strip() or DEFAULT_VOICE_ID
     key = os.environ.get("ELEVENLABS_API_KEY")
     if not VOICE_ID.fullmatch(voice):
         raise AudioUnavailable("Configure ELEVENLABS_VOICE_ID.")

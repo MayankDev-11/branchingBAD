@@ -16,6 +16,9 @@ RED_FLAGS = re.compile(
     r"pass(?:ed|ing)? out|sudden(?:ly)?[,\s]+(?:a\s+)?(?:very\s+)?severe headaches?|"
     r"(?:worst|thunderclap) headaches?|(?:trouble|difficulty) breathing|"
     r"shortness of breath|(?:can't|cannot|can not) breathe|"
+    r"(?:can't|cant|cannot|can not|unable to|inability to) (?:i )?(?:urinate|pee|piss|pass (?:any )?urine)"
+    r"(?=\s*(?:at all\b|anymore\b|[.!?,;:]|$))|"
+    r"(?:no|not passing any) urine (?:comes out|at all)\b|"
     r"(?:one[- ]sided|on one side) weakness|weakness (?:on|in) one side|"
     r"self[- ]harm|suicid\w*|(?:kill|hurt|harm) myself|end my life)\b",
     re.IGNORECASE,

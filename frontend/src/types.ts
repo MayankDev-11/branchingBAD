@@ -102,6 +102,7 @@ export interface BranchDetailResponse {
   hypotheses: BranchHypothesis[];
   experiment?: ExperimentInfo;
   evidence: EvidenceRow[];
+  guidance?: { title: string; message: string };
 }
 
 export interface BranchDraftContext {

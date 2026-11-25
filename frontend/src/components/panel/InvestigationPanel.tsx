@@ -200,6 +200,11 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   onGenerateDrafts,
 }) => {
   const [speakingSummary, setSpeakingSummary] = useState(false);
+  const [loadingAudio, setLoadingAudio] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
+  const [audioMessage, setAudioMessage] = useState('');
+  const branchAudio = useRef<HTMLAudioElement | null>(null);
+  const playbackRequest = useRef(0);
   const [action, setAction] = useState<BranchAction | null>(null);
   const [resolutionNote, setResolutionNote] = useState('');
   const [actionError, setActionError] = useState('');
@@ -230,6 +235,22 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
     setActionError('');
   }, [branch?.id]);
 
+
+  useEffect(() => {
+    const player = branchAudio.current;
+    setSpeakingSummary(false);
+    setLoadingAudio(false);
+    setAudioReady(false);
+    setAudioMessage('');
+    return () => {
+      playbackRequest.current += 1;
+      if (player) {
+        player.pause();
+        player.removeAttribute('src');
+        player.load();
+      }
+    };
+  }, [branch, askResult]);
 
   // 1. RED FLAG SAFETY SCREEN (blocks AI output completely)
   if (askResult?.red_flag) {
@@ -389,6 +410,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   if (!branch) return null;
 
   const workspace = branch.id.startsWith('br_custom_');
+  const guidance = branch.guidance;
   const exp = branch.experiment;
   const adherencePct = Math.min(100, Math.max(0, exp?.adherence_pct ?? 0));
   const firstCitedId = branch.hypotheses[0]?.claims[0]?.record_ids[0] ?? branch.change_event?.record_ids[0];
@@ -399,34 +421,46 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   });
 
   const handleSpeakBranch = async () => {
-    if (speakingSummary) {
-      window.speechSynthesis?.cancel();
-      setSpeakingSummary(false);
+    const player = branchAudio.current;
+    if (!player || loadingAudio) return;
+    if (!player.paused) {
+      player.pause();
       return;
     }
-    const top = branch.hypotheses[0];
-    const spoken = top
-      ? `Investigation: ${branch.title}. ${top.label ?? top.text}.${
-          top.confidence === undefined ? '' : ` The pattern score is ${top.confidence} percent.`
-        } ${
-          top.claims[0]?.text ?? 'Not enough data yet'
-        }. ${exp ? `Locked experiment: ${exp.description}, currently at ${adherencePct} percent adherence.` : ''}`
-      : `Investigation: ${branch.title}. Not enough data yet.`;
-    setSpeakingSummary(true);
+
+    const request = ++playbackRequest.current;
+    setAudioMessage('');
+    if (!audioReady) {
+      const top = branch.hypotheses[0];
+      const spoken = top
+        ? `Investigation: ${branch.title}. ${top.label ?? top.text}.${
+            top.confidence === undefined ? '' : ` The pattern score is ${top.confidence} percent.`
+          } ${top.claims[0]?.text ?? 'Not enough data yet.'}
+          ${exp ? `Locked experiment: ${exp.description}. Adherence: ${adherencePct} percent.` : ''}`
+        : `Investigation: ${branch.title}. Not enough data yet.`;
+      setLoadingAudio(true);
+      try {
+        const url = await synthesizeWithElevenLabs(spoken);
+        if (playbackRequest.current !== request) return;
+        player.src = url;
+        setAudioReady(true);
+      } catch (error) {
+        if (playbackRequest.current === request) {
+          setAudioMessage(error instanceof Error ? error.message : 'ElevenLabs narration unavailable.');
+        }
+        return;
+      } finally {
+        if (playbackRequest.current === request) setLoadingAudio(false);
+      }
+    }
+
     try {
-      const url = await synthesizeWithElevenLabs(spoken);
-      const audio = new Audio(url);
-      audio.onended = () => setSpeakingSummary(false);
-      await audio.play();
-    } catch {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(spoken);
-        u.rate = 1.03;
-        u.onend = () => setSpeakingSummary(false);
-        window.speechSynthesis.speak(u);
-      } else {
-        setSpeakingSummary(false);
+      await player.play();
+    } catch (error) {
+      if (playbackRequest.current === request) {
+        setAudioMessage(error instanceof DOMException && error.name === 'NotAllowedError'
+          ? 'Audio is ready. Press Play in the player to listen.'
+          : 'The browser could not play this audio.');
       }
     }
   };
@@ -508,6 +542,16 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
       </div>
 
       <div className="p-4 space-y-4">
+        {guidance && (
+          <section className="flex items-start gap-3 rounded-xl border border-border bg-s2 p-4" aria-labelledby="branch-guidance">
+            <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-amb" />
+            <div className="min-w-0 space-y-2">
+              <h3 id="branch-guidance" className="text-sm font-semibold text-t1">{guidance.title}</h3>
+              <p className="whitespace-pre-line text-[12.5px] leading-relaxed text-t2">{guidance.message}</p>
+            </div>
+          </section>
+        )}
+
         {workspace && resolution && (
           <div className="rounded-xl p-3.5" style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border)' }}>
             <h3 className="text-[12px] font-semibold text-ok">Resolution on the main timeline</h3>
@@ -556,7 +600,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           </section>
         )}
 
-        {workspace && draftContext && (draftContext.can_generate || draftContext.sent_to_ai) && (
+        {workspace && !guidance && draftContext && (draftContext.can_generate || draftContext.sent_to_ai) && (
           <section className="space-y-2 rounded-xl border border-border p-3.5">
             <h3 className="text-[12px] font-semibold text-t1">Gemini drafts</h3>
             <p className="text-[11.5px] leading-relaxed text-t2">
@@ -591,7 +635,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
             ))}
           </section>
         )}
-        {workspace && !branch.hypotheses.length && !draftContext?.can_generate && (
+        {workspace && !guidance && !branch.hypotheses.length && !draftContext?.can_generate && (
           <p className="text-[12px] text-t2">This branch has no suggested factors. Try a tracked demo outcome, such as headache days or short sleep.</p>
         )}
 
@@ -614,8 +658,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           </div>
         )}
 
-        {/* Competing Hypotheses */}
-        <div className="space-y-2.5">
+        {!guidance && <div className="space-y-2.5">
           <div className="flex items-center justify-between">
             <span className="font-mono text-[9.5px] uppercase tracking-wider text-t3">
               {branch.hypotheses.length} Competing Hypotheses
@@ -624,6 +667,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
               <button
                 type="button"
                 onClick={handleSpeakBranch}
+                disabled={loadingAudio}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-mono text-[9.5px] font-semibold transition-colors"
                 style={{
                   backgroundColor: speakingSummary ? 'var(--trunk)' : 'var(--s2)',
@@ -632,7 +676,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
                 }}
               >
                 <Volume2 className="w-3 h-3" />
-                <span>{speakingSummary ? 'Speaking…' : 'Listen with ElevenLabs'}</span>
+                <span>{loadingAudio ? 'Generating audio…' : speakingSummary ? 'Pause narration' : 'Listen with ElevenLabs'}</span>
               </button>
               <button
                 type="button"
@@ -645,6 +689,17 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
             </div>
           </div>
 
+          <audio
+            ref={branchAudio}
+            controls
+            aria-label="ElevenLabs narration"
+            className={audioReady ? 'w-full' : 'hidden'}
+            onPlaying={() => setSpeakingSummary(true)}
+            onPause={() => setSpeakingSummary(false)}
+            onEnded={() => setSpeakingSummary(false)}
+          />
+          {audioMessage && <p role="status" className="text-[12px] text-t2">{audioMessage}</p>}
+
           {branch.hypotheses.map((hyp) => (
             <HypothesisCard
               key={hyp.rank}
@@ -655,7 +710,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
               onOpenRecord={(rid) => onOpenRecord(rid, 'raw')}
             />
           ))}
-        </div>
+        </div>}
 
         {/* Experiment Card */}
         {exp && (
@@ -715,8 +770,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           </div>
         )}
 
-        {/* Evidence List */}
-        <div className="space-y-2 pb-4">
+        {!guidance && <div className="space-y-2 pb-4">
           <div className="font-mono text-[9.5px] uppercase tracking-wider text-t3">
             {branch.evidence.length} Evidence Records
           </div>
@@ -752,7 +806,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
               </button>
             );
           })}
-        </div>
+        </div>}
       </div>
     </aside>
   );

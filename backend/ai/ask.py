@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.ai.demo_questions import interpret_demo_question
 from backend.ai.evidence import TOOLS, UnknownBranch, collect_evidence, synthetic_hypotheses
 from backend.ai.gemini import select_ranks
+from backend.ai.knowledge_catalog import URINARY, URINARY_GUIDANCE, URINARY_LABEL, question_outcome
 from backend.data.store import store
 from backend.privacy.questions import is_red_flag, scrub_question
 
@@ -108,6 +109,11 @@ def _new_client():
 def ask(question: str, branch_id: str | None, full_name: str = "", email: str = "") -> Answer:
     if is_red_flag(question):
         return Answer(red_flag=True, hypotheses=[], dropped_claims=0, sent_to_ai="")
+    if question_outcome(question) == URINARY:
+        return Answer(
+            red_flag=False, hypotheses=[Hypothesis(rank=1, text=URINARY_LABEL, claims=[], test=URINARY_GUIDANCE)],
+            dropped_claims=0, sent_to_ai="",
+        )
     load_dotenv()
     provider = os.environ.get("ROOTTRACE_AI_PROVIDER", "bedrock").strip().lower()
     if provider == "gemini":

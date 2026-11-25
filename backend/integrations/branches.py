@@ -13,12 +13,14 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 from backend.ai.gemini import GeminiUnavailable
+from backend.ai.knowledge_catalog import URINARY, URINARY_GUIDANCE, URINARY_LABEL
 from backend.auth.dependencies import CurrentUser, get_current_user
 from backend.data.metrics import METRICS
 from backend.data.queries import build_record
 from backend.data.store import store
 from backend.integrations.branch_drafts import DraftsUnavailable, can_generate, generate_workspace_drafts
-from backend.integrations.branch_evidence import workspace_hypotheses, workspace_outcome
+from backend.integrations.branch_evidence import workspace_hypotheses, workspace_metrics, workspace_outcome
+from backend.integrations.knowledge_store import initialize_knowledge, knowledge_entries, remember_resolution
 from backend.routes.branches import get_branch as demo_branch
 from backend.routes.experiments import AdvanceBody, advance as advance_demo, reset as reset_demo
 from backend.routes.graph import get_graph as demo_graph
@@ -69,6 +71,7 @@ def _connect() -> sqlite3.Connection:
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS workspace_branch_owner ON workspace_branches(user_id, sequence)")
+    initialize_knowledge(conn)
     return conn
 
 
@@ -94,12 +97,24 @@ def workspace_branch(user_id: str, branch_id: str) -> dict | None:
 
 
 def _detail(branch_id: str, payload: dict) -> dict:
+    outcome = workspace_outcome(payload)
+    detail = {
+        "id": branch_id, "title": payload["title"], "branch_type": payload["branch_type"],
+        "status": _status(payload), "start_date": payload["start_date"], "change_event": None,
+        "hypotheses": [], "experiment": None, "evidence": [],
+    }
+    if outcome == URINARY:
+        return {**detail, "guidance": {"title": URINARY_LABEL, "message": URINARY_GUIDANCE}}
+
     readings = []
     with store.connection() as conn:
         clock = store.clock
         end = min(payload["start_date"], clock.isoformat())
         hypotheses = workspace_hypotheses(conn, payload, clock)
-        for metric in payload["metrics"]:
+        metrics = workspace_metrics(payload, outcome)
+        if metrics and payload["branch_type"] == "investigation" and outcome in METRICS and outcome not in metrics:
+            metrics = [*metrics, outcome]
+        for metric in metrics:
             rows = conn.execute(
                 "SELECT id FROM observations WHERE metric = ? AND date <= ? AND is_excluded = 0 "
                 "ORDER BY date DESC, id DESC LIMIT 2",
@@ -110,11 +125,7 @@ def _detail(branch_id: str, payload: dict) -> dict:
                 reading = {key: record[key] for key in ("id", "date", "metric", "value", "device", "source_id")}
                 reading["label"] = METRICS[metric].label(record["value"])
                 readings.append(reading)
-    return {
-        "id": branch_id, "title": payload["title"], "branch_type": payload["branch_type"],
-        "status": _status(payload), "start_date": payload["start_date"], "change_event": None,
-        "hypotheses": hypotheses, "experiment": None, "evidence": readings,
-    }
+    return {**detail, "hypotheses": hypotheses, "evidence": readings}
 
 
 def _workspace_entries(user_id: str) -> list[tuple[str, dict]]:
@@ -191,18 +202,25 @@ def _history(user_id: str) -> list[dict]:
 
 def _draft_context(user_id: str, branch_id: str, payload: dict) -> dict:
     outcome = workspace_outcome(payload)
-    related = [
-        {"id": other_id, "title": other["title"], "date": other["closed_date"], "note": other["resolution"]}
-        for other_id, other in _workspace_entries(user_id)
-        if other_id != branch_id and other.get("lifecycle") == "resolved"
-        and outcome != "untracked" and workspace_outcome(other) == outcome
-    ]
-    related.sort(key=lambda item: item["date"], reverse=True)
+    related = []
+    if outcome != "untracked":
+        with closing(_connect()) as conn:
+            related = [
+                {key: item[key] for key in ("id", "title", "date", "note")}
+                for item in knowledge_entries(conn, user_id, topic=outcome, exclude=branch_id)
+            ]
     return {
         "can_generate": can_generate(payload),
         "sent_to_ai": payload.get("draft_sent_to_ai", ""),
-        "related_resolutions": related[:3],
+        "related_resolutions": related,
     }
+
+
+@router.get("/knowledge")
+def account_knowledge(user: User, response: Response) -> list[dict]:
+    response.headers["Cache-Control"] = "no-store"
+    with closing(_connect()) as conn:
+        return knowledge_entries(conn, user.id)
 
 
 @router.get("/branches/{branch_id}/drafts")
@@ -268,6 +286,8 @@ def transition_branch(branch_id: str, body: BranchTransition, user: User, respon
                 "UPDATE workspace_branches SET payload = ? WHERE user_id = ? AND id = ?",
                 (json.dumps(payload, ensure_ascii=False), user.id, branch_id),
             )
+        if lifecycle == "resolved":
+            remember_resolution(conn, branch_id, user.id, payload)
     return {"detail": _detail(branch_id, payload), "graph": _with_workspace(demo_graph(), user.id),
             "history": _history(user.id)}
 

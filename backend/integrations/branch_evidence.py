@@ -1,11 +1,19 @@
 """Build workspace branch evidence using the existing demo analysis."""
 
-import re
 from datetime import date, timedelta
 
+from backend.ai.knowledge_catalog import (
+    DEMO_OUTCOMES,
+    TOPICS,
+    URINARY,
+    prospective_test,
+    question_outcome,
+    suggested_factors,
+)
 from backend.analysis.patterns import find_patterns
 from backend.analysis.series import load_series
 from backend.data.metrics import METRICS
+from backend.privacy.questions import is_red_flag
 
 LEGACY_DEFAULT = ["Prior-night sleep debt", "Low water intake", "Late-night screen"]
 FACTOR_LABELS = {
@@ -21,21 +29,19 @@ LABEL_ALIASES = {
     "water_ml": {"low daytime hydration"},
     "screen_late_min": {"late-night screen", "screen light before bed"},
 }
-DEMO_OUTCOMES = {"headache": "br_1", "sleep_min": "br_0"}
 
 
 def workspace_outcome(payload):
-    chosen = payload.get("outcome", "auto")
-    if chosen != "auto":
-        return chosen
-    title = payload["title"].casefold()
-    if re.search(r"\b(?:crash\w*|energy|tired\w*|fatigue|drows\w*)\b", title):
-        return "afternoon_energy"
-    if re.search(r"\bheadaches?\b", title):
-        return "headache"
-    if re.search(r"\b(?:sleep\w*|bedtime|insomnia)\b", title):
-        return "sleep_min"
-    return "untracked"
+    return question_outcome(payload["title"], payload.get("outcome", "auto"))
+
+
+def workspace_metrics(payload, outcome):
+    if outcome == URINARY or is_red_flag(payload["title"]):
+        return []
+    if (not any(metric != outcome for metric in payload["metrics"]) and payload["branch_type"] == "investigation"
+            and payload["hypotheses"] in ([], LEGACY_DEFAULT)):
+        return suggested_factors(payload["title"], outcome)
+    return payload["metrics"]
 
 
 def _snapshot(conn, metric_key, end):
@@ -57,7 +63,9 @@ def _snapshot(conn, metric_key, end):
 
 def workspace_hypotheses(conn, payload, clock):
     outcome = workspace_outcome(payload)
-    metrics = payload["metrics"]
+    if outcome == URINARY or is_red_flag(payload["title"]):
+        return []
+    metrics = workspace_metrics(payload, outcome)
     factors = [metric for metric in metrics if metric != outcome]
     draft_checks = {draft["label"]: draft["test"] for draft in payload.get("ai_drafts", [])}
     manual_labels = [] if payload["hypotheses"] == LEGACY_DEFAULT else payload["hypotheses"]
@@ -110,13 +118,12 @@ def workspace_hypotheses(conn, payload, clock):
                 "test": draft_checks.get(label, "Track the same factor and outcome together to see whether this pattern repeats."),
             })
             continue
-        if outcome == "afternoon_energy":
-            factor = METRICS[metric].title.lower() if metric else "this factor"
-            guidance = f"Afternoon energy is missing from the demo. To test this, compare {factor} with a same-day afternoon energy rating."
-        elif source and metric in definitions:
+        if source and metric in definitions:
             guidance = "More matched days with and without this factor and outcome are needed to score the pattern."
         elif payload["branch_type"] == "habit":
             guidance = "Use the linked readings as a starting point and log whether you completed the habit."
+        elif outcome in TOPICS:
+            guidance = prospective_test(outcome, METRICS[metric].title.lower() if metric else "this factor")
         else:
             guidance = "Choose a logged outcome and a measurable factor to test this draft."
         hypotheses.append({

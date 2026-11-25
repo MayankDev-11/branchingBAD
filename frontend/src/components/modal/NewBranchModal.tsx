@@ -108,30 +108,34 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
 
   // Voice + ElevenLabs state
-  const [isRecording, setIsRecording] = useState(false);
+  const [voicePhase, setVoicePhase] = useState<'idle' | 'requesting' | 'recording' | 'transcribing'>('idle');
   const [transcript, setTranscript] = useState('');
-  const [voiceStatus, setVoiceStatus] = useState<string>('Ready · Tap mic to speak or pick a quick voice sample');
+  const [voiceStatus, setVoiceStatus] = useState('');
+  const isRecording = voicePhase === 'recording';
+  const voiceBusy = voicePhase !== 'idle';
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const captureVersion = useRef(0);
 
-  useEffect(() => () => {
-    captureVersion.current += 1;
-    const recorder = mediaRecorderRef.current;
-    if (recorder) {
-      recorder.onstop = null;
-      recorder.ondataavailable = null;
-      if (recorder.state !== 'inactive') recorder.stop();
-      recorder.stream.getTracks().forEach((track) => track.stop());
-    }
-    mediaRecorderRef.current = null;
-    chunksRef.current = [];
+  useEffect(() => {
+    setVoicePhase('idle');
+    setVoiceStatus('');
+    return () => {
+      captureVersion.current += 1;
+      const recorder = mediaRecorderRef.current;
+      if (recorder) {
+        recorder.onstop = null;
+        recorder.ondataavailable = null;
+        recorder.onerror = null;
+        if (recorder.state !== 'inactive') recorder.stop();
+        recorder.stream.getTracks().forEach((track) => track.stop());
+      }
+      mediaRecorderRef.current = null;
+    };
   }, [open, mode]);
 
   useEffect(() => {
     setMode(initialMode);
-    setIsRecording(false);
   }, [initialMode, open]);
 
   useEffect(() => {
@@ -173,29 +177,52 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
   };
 
   const startVoiceCapture = async () => {
+    if (voiceBusy) return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setVoiceStatus('Microphone recording requires a supported browser on localhost or HTTPS.');
+      return;
+    }
     const version = ++captureVersion.current;
     setTranscript('');
-    setIsRecording(true);
-    setVoiceStatus('Recording for ElevenLabs transcription…');
+    setVoicePhase('requesting');
+    setVoiceStatus('Allow microphone access if your browser asks.');
 
-    // Record audio buffer for ElevenLabs STT (RAM-only, discarded after transcription)
+    let stream: MediaStream | undefined;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (captureVersion.current !== version) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
-      const mr = new MediaRecorder(stream);
-      chunksRef.current = [];
-      mr.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      const releaseRecorder = () => {
+        recorder.stream.getTracks().forEach((track) => track.stop());
+        mediaRecorderRef.current = null;
       };
-      mr.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: mr.mimeType || 'audio/webm' });
-        chunksRef.current = []; // Immediately discard audio chunks from RAM
+      recorder.ondataavailable = ({ data }) => {
+        if (data.size > 0) chunks.push(data);
+      };
+      recorder.onerror = () => {
+        recorder.onstop = null;
+        recorder.ondataavailable = null;
+        chunks.length = 0;
+        releaseRecorder();
+        setVoicePhase('idle');
+        setVoiceStatus('Recording was interrupted. Check your microphone and try again.');
+      };
+      recorder.onstop = async () => {
+        releaseRecorder();
+        if (captureVersion.current !== version) return;
+        const blob = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || 'audio/webm' });
+        chunks.length = 0;
         try {
-          setVoiceStatus('Transcribing via ElevenLabs Scribe STT...');
+          if (!blob.size) {
+            setVoiceStatus('No audio was captured. Start a new recording and speak before stopping.');
+            return;
+          }
+          setVoicePhase('transcribing');
+          setVoiceStatus('Transcribing with ElevenLabs…');
           const text = await api.transcribeVoiceWithElevenLabs(blob);
           if (captureVersion.current !== version) return;
           setTranscript(text);
@@ -207,29 +234,38 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
           if (captureVersion.current === version) {
             setVoiceStatus(error instanceof Error ? error.message : 'Transcription failed. Try again or type the branch.');
           }
+        } finally {
+          if (captureVersion.current === version) setVoicePhase('idle');
         }
       };
-      mr.start();
-      mediaRecorderRef.current = mr;
-    } catch {
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setVoicePhase('recording');
+      setVoiceStatus('Recording. Speak, then select Stop and transcribe.');
+    } catch (error) {
+      stream?.getTracks().forEach((track) => track.stop());
       if (captureVersion.current !== version) return;
-      setVoiceStatus('Mic permission unavailable — tap a Demo Voice Sample below to test');
-      setIsRecording(false);
+      setVoicePhase('idle');
+      const name = error instanceof DOMException ? error.name : '';
+      if (name === 'NotAllowedError') {
+        setVoiceStatus('Microphone access is blocked. Allow it in this site’s permissions and try again.');
+      } else if (name === 'NotFoundError') {
+        setVoiceStatus('No microphone was found. Connect or enable one and try again.');
+      } else {
+        setVoiceStatus('Could not start the microphone. Check your browser or system input settings.');
+      }
     }
   };
 
   const stopVoiceCapture = () => {
-    setIsRecording(false);
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    } else {
-      captureVersion.current += 1;
-      setVoiceStatus('Recording cancelled.');
-    }
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === 'inactive') return;
+    setVoicePhase('transcribing');
+    setVoiceStatus('Preparing recording…');
+    recorder.stop();
   };
 
   const runVoicePreset = (preset: (typeof VOICE_PRESETS)[number]) => {
-    setIsRecording(false);
     setTranscript(preset.transcript);
     applyParsedDraft(preset.parsed);
     setVoiceStatus('Sample voice draft ready · Review before creating the branch');
@@ -347,8 +383,8 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
               <button
                 type="button"
                 onClick={isRecording ? stopVoiceCapture : startVoiceCapture}
-                aria-label={isRecording ? 'Stop recording' : 'Record with ElevenLabs'}
-                className="w-16 h-16 rounded-full flex items-center justify-center transition-transform hover:scale-105"
+                disabled={voiceBusy && !isRecording}
+                className="flex items-center gap-2 rounded-full px-4 py-2.5 text-[12.5px] font-semibold disabled:opacity-50"
                 style={{
                   backgroundColor: isRecording ? 'var(--change)' : 'var(--trunk)',
                   color: isRecording ? '#ffffff' : 'var(--btn-ink)',
@@ -357,9 +393,10 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
                     : '0 0 24px var(--trunk-glow)',
                 }}
               >
-                {isRecording ? <Square className="w-6 h-6 fill-current" /> : <Mic className="w-7 h-7" />}
+                {isRecording ? <Square className="h-4 w-4 fill-current" /> : <Mic className="h-4 w-4" />}
+                {isRecording ? 'Stop and transcribe' : 'Start recording'}
               </button>
-              <p className="mt-2.5 font-mono text-[10.5px] text-t2 text-center">{voiceStatus}</p>
+              {voiceStatus && <p role="status" className="mt-2.5 text-[11px] text-t2 text-center">{voiceStatus}</p>}
 
               {/* Quick Demo Voice Samples */}
               <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
@@ -369,7 +406,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
                     key={p.label}
                     type="button"
                     onClick={() => runVoicePreset(p)}
-                    disabled={isRecording}
+                    disabled={voiceBusy}
                     className="px-2.5 py-1 rounded-full font-mono text-[10px] text-t2 hover:text-t1 transition-colors"
                     style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border)' }}
                   >

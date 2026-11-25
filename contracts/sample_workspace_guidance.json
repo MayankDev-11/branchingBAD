@@ -1,0 +1,15 @@
+{
+  "id": "br_custom_0123456789abcdef0123456789abcdef",
+  "title": "Why is it hard to urinate?",
+  "branch_type": "investigation",
+  "status": "open",
+  "start_date": "2026-11-20",
+  "change_event": null,
+  "hypotheses": [],
+  "experiment": null,
+  "evidence": [],
+  "guidance": {
+    "title": "Urination isn’t tracked",
+    "message": "RootTrace tracks fluid intake. It has no urine or bladder readings to explain this symptom. Contact a healthcare professional about difficulty urinating.\n\nIf you cannot pass urine at all or have severe lower abdominal pain, seek emergency care now."
+  }
+}

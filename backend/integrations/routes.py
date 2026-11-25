@@ -1,5 +1,6 @@
 """Signed-in API routes for RootTrace AI and integrations."""
 
+import re
 from typing import Annotated
 
 from dotenv import load_dotenv
@@ -7,10 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from backend.ai.ask import Answer, ModelUnavailable, ask
+from backend.ai.ask import Answer, Hypothesis, ModelUnavailable, ask
+from backend.ai.demo_questions import MEDICAL, interpret_demo_question
 from backend.ai.evidence import UnknownBranch
 from backend.ai.gemini import GeminiUnavailable
+from backend.ai.knowledge_catalog import DEMO_OUTCOMES, TOPICS, URINARY, question_outcome
 from backend.auth.dependencies import CurrentUser, get_current_user
+from backend.data.store import store
+from backend.integrations.branch_evidence import workspace_hypotheses
 from backend.integrations.branches import workspace_branch
 from backend.integrations.obsidian import build_vault
 from backend.integrations.weekly import AudioUnavailable, audio_path, weekly_report
@@ -37,11 +42,30 @@ class AskRequest(BaseModel):
 @router.post("/ask", response_model=Answer)
 def ask_route(body: AskRequest, user: User, response: Response) -> Answer:
     response.headers["Cache-Control"] = "no-store"
-    if body.branch_id and body.branch_id.startswith("br_custom_") and not is_red_flag(body.question):
-        if workspace_branch(user.id, body.branch_id) is None:
-            raise HTTPException(404, "Branch not found.")
-        return Answer(red_flag=False, hypotheses=[], dropped_claims=0, sent_to_ai="")
     try:
+        if is_red_flag(body.question):
+            return ask(body.question, body.branch_id)
+        workspace = None
+        if body.branch_id and body.branch_id.startswith("br_custom_"):
+            workspace = workspace_branch(user.id, body.branch_id)
+            if workspace is None:
+                raise HTTPException(404, "Branch not found.")
+        outcome = question_outcome(body.question)
+        if outcome == URINARY:
+            return ask(body.question, body.branch_id)
+        if workspace or (body.branch_id in (None, *DEMO_OUTCOMES.values()) and outcome not in DEMO_OUTCOMES):
+            intent = interpret_demo_question(body.question, None, store.clock)
+            if intent and intent.kind in {"reading", "change"} and workspace:
+                return ask(body.question, None, user.full_name, user.email)
+            if outcome in TOPICS and (not intent or intent.kind == "patterns"):
+                text = body.question.casefold()
+                if not MEDICAL.search(text) and re.search(
+                    r"\b(?:why|reason\w*|relat\w*|affect\w*|influenc\w*|trigger\w*|lead to|caus\w*|"
+                    r"contribut\w*|test\w*|track\w*|pattern\w*)\b", text,
+                ):
+                    return _catalog_answer(body.question, outcome, workspace)
+            if workspace:
+                return Answer(red_flag=False, hypotheses=[], dropped_claims=0, sent_to_ai="")
         return ask(body.question, body.branch_id, user.full_name, user.email)
     except UnknownBranch:
         raise HTTPException(404, "Branch not found.") from None
@@ -56,6 +80,21 @@ def ask_route(body: AskRequest, user: User, response: Response) -> Answer:
         if type(exc).__module__.startswith("botocore"):
             raise HTTPException(502, "Bedrock is temporarily unavailable.") from None
         raise
+
+
+def _catalog_answer(question: str, outcome: str, workspace: dict | None) -> Answer:
+    with store.connection() as conn:
+        clock = store.clock
+        factors = workspace_hypotheses(conn, {
+            "title": question, "outcome": outcome, "branch_type": "investigation",
+            "start_date": workspace["start_date"] if workspace else clock.isoformat(),
+            "metrics": [], "hypotheses": [],
+        }, clock)
+    return Answer(
+        red_flag=False, dropped_claims=0, sent_to_ai="",
+        hypotheses=[Hypothesis(rank=item["rank"], text=item["label"], claims=item["claims"], test=item["test"])
+                    for item in factors],
+    )
 
 
 @router.get("/report/weekly")

@@ -344,7 +344,7 @@ export const api = {
 
   async transcribeVoiceWithElevenLabs(audioBlob: Blob): Promise<string> {
     const form = new FormData();
-    form.append('audio', audioBlob, 'voice.webm');
+    form.append('audio', audioBlob, 'check-in');
     const res = await fetch(`${API_BASE}/api/voice/transcribe`, {
       method: 'POST', credentials: 'include', body: form,
     });
@@ -481,7 +481,10 @@ export async function synthesizeWithElevenLabs(text: string): Promise<string> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
   });
-  if (!res.ok) throw new Error('ElevenLabs narration unavailable.');
+  if (!res.ok) {
+    const failure = await res.json().catch(() => ({}));
+    throw new Error(typeof failure.detail === 'string' ? failure.detail : 'ElevenLabs narration unavailable.');
+  }
   const url = URL.createObjectURL(await res.blob());
   ttsAudioCache.set(text, url);
   return url;
