@@ -31,3 +31,14 @@ The Vite dev server still runs on port 5173. Open the Judge Demo and use the Ask
 - The existing frontend exposes its own audio brief and single-file Markdown export. The new weekly report and ZIP endpoints can be opened directly after sign-in.
 
 Run the mocked tests with `.venv/bin/python -m pytest backend/integrations/tests -q`. The tests use synthetic demo data and make no external AI or voice requests.
+
+## New Branch
+
+Use **New Branch** in the signed-in dashboard, choose an investigation or habit, and
+submit a manual or voice draft. Saved branches are stored per account in the SQLite
+workspace database (`data/roottrace_workspace.db`, overridable with
+`ROOTTRACE_WORKSPACE_DB`). They stay visible after reload or a demo clock reset.
+The shared Judge Demo login uses one shared demo account.
+
+Selected metrics display real demo readings for context. User-entered hypotheses
+start without verified claims or an experiment. The voice transcript is not persisted.

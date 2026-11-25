@@ -10,9 +10,10 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from backend.ai.ask import Answer, ModelUnavailable, ask
 from backend.ai.evidence import UnknownBranch
 from backend.auth.dependencies import CurrentUser, get_current_user
+from backend.integrations.branches import workspace_branch
 from backend.integrations.obsidian import build_vault
 from backend.integrations.weekly import AudioUnavailable, audio_path, weekly_report
-from backend.privacy.questions import PrivacyUnavailable
+from backend.privacy.questions import PrivacyUnavailable, is_red_flag
 
 load_dotenv()
 
@@ -35,6 +36,10 @@ class AskRequest(BaseModel):
 @router.post("/ask", response_model=Answer)
 def ask_route(body: AskRequest, user: User, response: Response) -> Answer:
     response.headers["Cache-Control"] = "no-store"
+    if body.branch_id and body.branch_id.startswith("br_custom_") and not is_red_flag(body.question):
+        if workspace_branch(user.id, body.branch_id) is None:
+            raise HTTPException(404, "Branch not found.")
+        return Answer(red_flag=False, hypotheses=[], dropped_claims=0, sent_to_ai="")
     try:
         return ask(body.question, body.branch_id, user.full_name, user.email)
     except UnknownBranch:
