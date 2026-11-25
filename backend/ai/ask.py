@@ -1,4 +1,4 @@
-"""Bedrock Converse workflow and evidence validation."""
+"""Ask provider selection, Bedrock Converse, and shared evidence validation."""
 
 import json
 import os
@@ -8,7 +8,9 @@ from decimal import Decimal
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.ai.evidence import TOOLS, collect_evidence
+from backend.ai.evidence import TOOLS, collect_evidence, synthetic_hypotheses
+from backend.ai.gemini import demo_topic, select_ranks
+from backend.data.store import store
 from backend.privacy.questions import is_red_flag, scrub_question
 
 SYSTEM = (
@@ -105,12 +107,30 @@ def _new_client():
 def ask(question: str, branch_id: str | None, full_name: str = "", email: str = "") -> Answer:
     if is_red_flag(question):
         return Answer(red_flag=True, hypotheses=[], dropped_claims=0, sent_to_ai="")
+    load_dotenv()
+    provider = os.environ.get("ROOTTRACE_AI_PROVIDER", "bedrock").strip().lower()
+    if provider == "gemini":
+        topic, default_branch = demo_topic(question)
+        candidates, valid_ids = synthetic_hypotheses(branch_id or default_branch, store.clock)
+        if not candidates:
+            return Answer(red_flag=False, hypotheses=[], dropped_claims=0, sent_to_ai="")
+        ranks, audit = select_ranks(topic, candidates)
+        selected = set(ranks)
+        proposed = Answer(
+            red_flag=False,
+            hypotheses=[Hypothesis.model_validate(item) for item in candidates if item["rank"] in selected],
+            dropped_claims=0,
+            sent_to_ai="",
+        )
+        return validate_answer(proposed, candidates, valid_ids, audit)
+    if provider != "bedrock":
+        raise ModelUnavailable("Set ROOTTRACE_AI_PROVIDER to gemini or bedrock.")
+
     clean = scrub_question(question, full_name, email)
     evidence, valid_ids = collect_evidence(branch_id, clean)
     if not evidence["branch_patterns"]:
         return Answer(red_flag=False, hypotheses=[], dropped_claims=0, sent_to_ai="")
 
-    load_dotenv()
     model_id = os.environ.get("BEDROCK_MODEL_ID")
     guardrail_id = os.environ.get("BEDROCK_GUARDRAIL_ID")
     guardrail_version = os.environ.get("BEDROCK_GUARDRAIL_VERSION")

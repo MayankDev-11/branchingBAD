@@ -1,9 +1,14 @@
 """Prepare read-only, aggregate evidence from the seeded demo database."""
 
+from contextlib import closing
+from functools import lru_cache
+
 from backend.analysis.baselines import get_baseline
 from backend.analysis.patterns import compare_periods, summarize_metric
 from backend.analysis.series import days
-from backend.data.db import loads
+from backend.analysis.state import refresh_state
+from backend.data import generate_demo
+from backend.data.db import connect, loads
 from backend.data.queries import build_branch
 from backend.data.store import store
 
@@ -29,6 +34,49 @@ class UnknownBranch(ValueError):
     pass
 
 
+def _branch_hypotheses(conn, branch_id, clock):
+    branch = build_branch(conn, branch_id, clock) if branch_id else None
+    if branch_id and branch is None:
+        raise UnknownBranch(branch_id)
+    if branch is None:
+        return None, []
+    metrics = {
+        row["label"]: row["metric"]
+        for row in conn.execute("SELECT label, metric FROM hypotheses WHERE branch_id = ?", (branch_id,))
+    }
+    return branch, [
+        {
+            "rank": item["rank"], "text": item["label"], "claims": item["claims"],
+            "test": SAFE_TESTS.get(metrics.get(item["label"]), DEFAULT_TEST),
+        }
+        for item in branch["hypotheses"] if item["claims"]
+    ]
+
+
+def _valid_record_ids(conn, clock, hypotheses):
+    cited = {record for h in hypotheses for claim in h["claims"] for record in claim["record_ids"]}
+    if not cited:
+        return set()
+    placeholders = ",".join("?" for _ in cited)
+    return {
+        row["id"] for row in conn.execute(
+            f"SELECT id FROM observations WHERE id IN ({placeholders}) AND date <= ? AND is_excluded = 0",
+            (*cited, clock.isoformat()),
+        )
+    }
+
+
+@lru_cache(maxsize=8)
+def synthetic_hypotheses(branch_id, clock):
+    """Create Gemini evidence from the generator alone, independent of workspace data."""
+    with closing(connect(":memory:")) as conn:
+        generate_demo.build(conn)
+        if clock != generate_demo.CLOCK_START:
+            refresh_state(conn, clock)
+        _, hypotheses = _branch_hypotheses(conn, branch_id, clock)
+        return hypotheses, _valid_record_ids(conn, clock, hypotheses)
+
+
 def collect_evidence(branch_id: str | None, question: str) -> tuple[dict, set[str]]:
     with store.connection() as conn:
         clock = store.clock
@@ -40,24 +88,8 @@ def collect_evidence(branch_id: str | None, question: str) -> tuple[dict, set[st
                 (clock.isoformat(), outcome),
             ).fetchone()
             branch_id = row["id"] if row else None
-        branch = build_branch(conn, branch_id, clock) if branch_id else None
-        if branch_id and branch is None:
-            raise UnknownBranch(branch_id)
+        branch, hypotheses = _branch_hypotheses(conn, branch_id, clock)
         experiment = branch["experiment"] if branch else None
-        hypotheses = []
-        if branch:
-            metrics = {
-                row["label"]: row["metric"]
-                for row in conn.execute("SELECT label, metric FROM hypotheses WHERE branch_id = ?", (branch_id,))
-            }
-            hypotheses = [
-                {
-                    "rank": item["rank"], "text": item["label"],
-                    "claims": item["claims"],
-                    "test": SAFE_TESTS.get(metrics.get(item["label"]), DEFAULT_TEST),
-                }
-                for item in branch["hypotheses"] if item["claims"]
-            ]
         evidence = {
             "branch_patterns": hypotheses,
             "recent_summary": [
@@ -82,14 +114,5 @@ def collect_evidence(branch_id: str | None, question: str) -> tuple[dict, set[st
                 for key in ("status", "locked", "duration_days", "days_elapsed", "adherence_pct")
             } if experiment else None,
         }
-        cited = {record for h in hypotheses for claim in h["claims"] for record in claim["record_ids"]}
-        valid = set()
-        if cited:
-            placeholders = ",".join("?" for _ in cited)
-            valid = {
-                row["id"] for row in conn.execute(
-                    f"SELECT id FROM observations WHERE id IN ({placeholders}) AND date <= ? AND is_excluded = 0",
-                    (*cited, clock.isoformat()),
-                )
-            }
+        valid = _valid_record_ids(conn, clock, hypotheses)
     return evidence, valid

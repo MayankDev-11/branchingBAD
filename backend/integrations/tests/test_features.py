@@ -58,6 +58,7 @@ def test_local_scrubbing(monkeypatch):
 
 
 def test_ask_uses_tool_evidence_and_drops_fabricated_claims(browser, monkeypatch):
+    monkeypatch.setenv("ROOTTRACE_AI_PROVIDER", "bedrock")
     monkeypatch.setenv("BEDROCK_MODEL_ID", "mock-haiku")
     monkeypatch.setenv("BEDROCK_GUARDRAIL_ID", "mock-guardrail")
     monkeypatch.setenv("BEDROCK_GUARDRAIL_VERSION", "1")

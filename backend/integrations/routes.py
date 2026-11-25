@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from backend.ai.ask import Answer, ModelUnavailable, ask
 from backend.ai.evidence import UnknownBranch
+from backend.ai.gemini import GeminiUnavailable
 from backend.auth.dependencies import CurrentUser, get_current_user
 from backend.integrations.branches import workspace_branch
 from backend.integrations.obsidian import build_vault
@@ -44,6 +45,8 @@ def ask_route(body: AskRequest, user: User, response: Response) -> Answer:
         return ask(body.question, body.branch_id, user.full_name, user.email)
     except UnknownBranch:
         raise HTTPException(404, "Branch not found.") from None
+    except GeminiUnavailable as exc:
+        raise HTTPException(503, str(exc)) from None
     except (ModelUnavailable, PrivacyUnavailable):
         raise HTTPException(503, "Ask is unavailable. Check Bedrock and local privacy setup.") from None
     except (ImportError, ValidationError):

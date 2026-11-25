@@ -1,22 +1,37 @@
 # RootTrace AI and integrations
 
-From the repository root, install the backend requirements and the additional AI dependencies in your virtual environment.
+## Gemini demo on the free tier
+
+`gemini-3.5-flash-lite` has a free tier. Keep the Gemini project on the free tier and put its server-side key in the repository root's git-ignored `.env`.
+
+```dotenv
+ROOTTRACE_AI_PROVIDER=gemini
+GEMINI_API_KEY=
+```
+
+The value after `GEMINI_API_KEY=` is your key. The Gemini path uses the standard Python requirements and needs no AWS settings or spaCy model. It sends a fixed demo topic and evidence rebuilt from the synthetic generator in memory. The typed question, account details, workspace branches and imported data stay local. The backend handles red flags first, enables Gemini content filters, and verifies selections before returning citations. Google may use free-tier requests to improve its products. [Model pricing](https://aistudio.google.com/docs/models/gemini-3.5-flash-lite#pricing) · [Gemini terms](https://aistudio.google.com/docs/terms)
+
+## Bedrock and weekly audio
+
+To use Bedrock, set `ROOTTRACE_AI_PROVIDER=bedrock` and install its additional dependencies.
 
 ```bash
 .venv/bin/python -m pip install -r requirements.txt -r backend/ai/requirements.txt
 .venv/bin/python -m spacy download en_core_web_sm
 ```
 
-Set the following in the repository root's git-ignored `.env`.
+These providers read their settings from the same local `.env`.
 
 | Variable | Purpose |
 | --- | --- |
 | `BEDROCK_MODEL_ID` | India inference profile `in.anthropic.claude-haiku-4-5-20251001-v1:0` |
-| `BEDROCK_GUARDRAIL_ID` and `BEDROCK_GUARDRAIL_VERSION` | Required for Ask. Use a Bedrock guardrail configured with sensitive-information masking |
+| `BEDROCK_GUARDRAIL_ID` and `BEDROCK_GUARDRAIL_VERSION` | Required for Bedrock Ask. Use a guardrail configured with sensitive-information masking |
 | `ELEVENLABS_API_KEY` | Read server-side for weekly narration |
 | `ELEVENLABS_VOICE_ID` | Voice to use for weekly narration |
 
-Configure the AWS credential chain with a profile or environment variables whose identity can invoke the selected Bedrock inference profile in `ap-south-1`. Presidio requires the local spaCy model before an Ask request can reach Bedrock.
+Configure the AWS credential chain with an identity that can invoke the selected Bedrock inference profile in `ap-south-1`. Presidio requires the local spaCy model before an Ask request can reach Bedrock. Weekly audio still uses ElevenLabs. The existing frontend audio brief can use the browser's built-in voice without an API key.
+
+## Run the app
 
 Stop the existing backend if it is running, then start the combined app on port 8000.
 
