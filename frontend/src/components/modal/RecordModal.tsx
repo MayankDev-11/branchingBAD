@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { AlertTriangle, CheckCircle2, ShieldAlert, X } from 'lucide-react';
+import { ChevronDown, ShieldAlert, X } from 'lucide-react';
+import { readAskAudit } from '../../askAudit';
 import type { AskResponse, RecordDetailResponse } from '../../types';
 
 interface RecordModalProps {
@@ -33,10 +34,8 @@ export const RecordModal: React.FC<RecordModalProps> = ({
 
   if (!record) return null;
 
-  const sentToAi =
-    askContext?.sent_to_ai ??
-    'Nothing has been sent to the AI yet. Ask a question in the box at the top, and the exact scrubbed text that was sent will appear here.';
-  const scrubbedParts = sentToAi.split('[PERSON_1]');
+  const sentToAi = askContext?.sent_to_ai ?? '';
+  const audit = readAskAudit(sentToAi);
 
   const content = (
     <div
@@ -45,7 +44,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[540px] rounded-2xl p-6 shadow-2xl"
+        className="w-full max-w-[540px] max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl p-6 shadow-2xl"
         style={{
           backgroundColor: 'var(--s1)',
           border: '1px solid var(--border-strong)',
@@ -151,40 +150,74 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         ) : (
           /* TAB 2: WHAT THE AI SAW */
           <div className="mt-5 space-y-4">
-            <div
-              className="rounded-xl px-3.5 py-2.5 flex items-center gap-2.5 text-[12px] font-medium"
-              style={{
-                backgroundColor: 'rgba(245, 158, 11, 0.12)',
-                border: '1px solid rgba(245, 158, 11, 0.35)',
-                color: 'var(--amb)',
-              }}
-            >
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>All personal details were replaced before the AI received this</span>
-            </div>
+            {audit.provider === 'Gemini' ? (
+              <>
+                <div>
+                  <h4 className="text-sm font-semibold text-t1">Sent to Gemini</h4>
+                  <p className="mt-1 text-[12px] leading-relaxed text-t2">
+                    Gemini received a demo topic and synthetic evidence. Your typed question and account details stayed local.
+                  </p>
+                </div>
+                <div
+                  className="max-h-60 overflow-y-auto rounded-xl p-4"
+                  style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
+                >
+                  <p className="text-[13px] font-semibold text-t1">{audit.topic}</p>
+                  <ul className="mt-3 space-y-3">
+                    {audit.hypotheses.map((hypothesis) => (
+                      <li key={hypothesis.rank}>
+                        <h5 className="text-[12px] font-semibold text-t1">{hypothesis.text}</h5>
+                        <ul className="mt-1.5 space-y-2">
+                          {hypothesis.claims.map((claim) => (
+                            <li key={claim.text}>
+                              <p className="text-[12px] leading-relaxed text-t2">{claim.text}</p>
+                              <p className="mt-0.5 break-words font-mono text-[10px] leading-relaxed text-t3">
+                                {claim.record_ids.join(' · ')}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </>
+            ) : audit.provider === 'Claude Haiku on Bedrock' ? (
+              <div>
+                <h4 className="text-sm font-semibold text-t1">Sent to Claude Haiku on Bedrock</h4>
+                <p className="mt-1 text-[12px] leading-relaxed text-t2">
+                  Bedrock received a locally scrubbed question and evidence summaries.
+                </p>
+                {audit.question && <p className="mt-2 break-words text-[13px] text-t1">{audit.question}</p>}
+              </div>
+            ) : !sentToAi ? (
+              <p className="text-[12px] leading-relaxed text-t2">
+                {askContext?.red_flag
+                  ? 'RootTrace stopped at the local safety check.'
+                  : askContext?.hypotheses.length
+                  ? 'RootTrace computed this answer locally from demo records.'
+                  : 'Nothing has been sent to the AI yet. Submit an Ask question to inspect the request here.'}
+              </p>
+            ) : null}
 
-            <div
-              className="rounded-xl p-4 font-mono text-[11.5px] leading-relaxed text-t2 max-h-[200px] overflow-y-auto"
-              style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
-            >
-              {scrubbedParts.length > 1 ? (
-                <>
-                  {scrubbedParts[0]}
-                  <span
-                    className="inline-block px-1.5 py-0.5 mr-1 rounded font-bold text-t1"
-                    style={{
-                      backgroundColor: 'rgba(20, 184, 166, 0.25)',
-                      border: '1px solid var(--branch-open)',
-                    }}
-                  >
-                    [PERSON_1]
-                  </span>
-                  {scrubbedParts.slice(1).join('[PERSON_1]')}
-                </>
-              ) : (
-                sentToAi
-              )}
-            </div>
+            {sentToAi && (
+              <details
+                key={record.id}
+                className="group rounded-xl"
+                style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
+              >
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-2.5 text-[12px] font-semibold text-t1 [&::-webkit-details-marker]:hidden">
+                  {audit.provider ? 'View raw JSON' : 'View exact request'}
+                  <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180" />
+                </summary>
+                <pre
+                  className="max-h-56 overflow-auto whitespace-pre-wrap px-4 py-3 font-mono text-[11px] leading-relaxed text-t2 [overflow-wrap:anywhere]"
+                  style={{ borderTop: '1px solid var(--border)' }}
+                >
+                  {sentToAi}
+                </pre>
+              </details>
+            )}
 
             {/* Compact Raw Summary Strip */}
             <div
@@ -192,7 +225,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
               style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border)' }}
             >
               <div className="font-mono text-[9.5px] uppercase text-t3">
-                Raw Summary · {record.id}
+                Local record only · {record.id}
               </div>
               <div className="mt-1 font-mono text-[11.5px] text-t1">
                 {record.value} {record.unit} ({record.display}) · {record.date} · {record.device} ·
@@ -200,33 +233,19 @@ export const RecordModal: React.FC<RecordModalProps> = ({
               </div>
             </div>
 
-            {/* Footer Verification Badges */}
-            <div className="flex flex-wrap items-center gap-2.5 pt-1">
-              {askContext && askContext.dropped_claims > 0 && (
-                <span
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full font-mono text-[11px] font-semibold"
-                  style={{
-                    backgroundColor: 'rgba(255, 77, 109, 0.14)',
-                    border: '1px solid rgba(255, 77, 109, 0.40)',
-                    color: 'var(--change)',
-                  }}
-                >
-                  <ShieldAlert className="w-3.5 h-3.5" />
-                  {askContext.dropped_claims} claim{askContext.dropped_claims === 1 ? '' : 's'} dropped after checking
-                </span>
-              )}
+            {askContext && askContext.dropped_claims > 0 && (
               <span
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full font-mono text-[11px] font-semibold"
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-mono text-[11px] font-semibold"
                 style={{
-                  backgroundColor: 'rgba(16, 185, 129, 0.12)',
-                  border: '1px solid rgba(16, 185, 129, 0.36)',
-                  color: 'var(--ok)',
+                  backgroundColor: 'rgba(255, 77, 109, 0.14)',
+                  border: '1px solid rgba(255, 77, 109, 0.40)',
+                  color: 'var(--change)',
                 }}
               >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Scrubbed locally via Presidio · Mumbai AI
+                <ShieldAlert className="h-3.5 w-3.5" />
+                {askContext.dropped_claims} claim{askContext.dropped_claims === 1 ? '' : 's'} dropped after checking
               </span>
-            </div>
+            )}
           </div>
         )}
       </div>

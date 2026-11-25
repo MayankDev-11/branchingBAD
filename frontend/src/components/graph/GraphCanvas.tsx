@@ -21,6 +21,7 @@ import {
   KnowledgeNode,
   MeltConfluenceNode,
   SubHypothesisNode,
+  TimelineResolutionNode,
 } from './CustomNodes';
 import { OrganicBranchEdge, TrunkEdge } from './CustomEdges';
 import { ElevenLabsBriefingDock, type BriefingBeat } from '../ElevenLabsBriefingDock';
@@ -34,6 +35,7 @@ const nodeTypes = {
   experimentLeaf: ExperimentLeafNode,
   meltConfluence: MeltConfluenceNode,
   knowledgeNode: KnowledgeNode,
+  timelineResolution: TimelineResolutionNode,
   evidenceDewdrop: EvidenceDewdropNode,
 };
 
@@ -104,12 +106,14 @@ const buildBriefing = (
       highlightNodes: ['br1-exp-1'],
     });
   }
-  const latest = graph.knowledge[graph.knowledge.length - 1];
+  const verifiedKnowledge = graph.knowledge.filter(({ id }) => !id.startsWith('kn_br_custom_'));
+  const latest = verifiedKnowledge.slice(-1)[0];
   if (latest) {
-    const solved = graph.branches.find((b) => b.status === 'concluded' && b.end_date === latest.date);
+    const solved = graph.branches.find((b) =>
+      !b.id.startsWith('br_custom_') && b.status === 'concluded' && b.end_date === latest.date);
     beats.push({
       id: 'beat-knowledge',
-      text: `${graph.knowledge.length === 1 ? 'One investigation has' : `${graph.knowledge.length} investigations have`} become verified knowledge. Latest: ${latest.statement}.`,
+      text: `${verifiedKnowledge.length === 1 ? 'One investigation has' : `${verifiedKnowledge.length} investigations have`} become verified knowledge. Latest: ${latest.statement}.`,
       recordIds: solved ? firstClaimIds(details[solved.id]?.hypotheses[0], 2) : [],
       highlightNodes: [solved?.id === 'br_1' ? 'br1-knowledge' : 'br0-knowledge'],
     });
@@ -186,7 +190,9 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
 
     // 1. Living Organic Main Root Trunk
     const trunkStartX = 40;
-    const trunkEndX = 1960;
+    const extraBranches = graph.branches.filter((branch) => branch.id.startsWith('br_custom_') && branch.status === 'open');
+    const resolutions = graph.knowledge.filter((item) => item.id.startsWith('kn_br_custom_'));
+    const trunkEndX = Math.max(1960, 1530 + extraBranches.length * 240, 1350 + resolutions.length * 180);
     n.push(
       { id: 'trunk-start', type: 'anchor', position: { x: trunkStartX, y: TRUNK_Y }, data: {} },
       { id: 'trunk-end', type: 'anchor', position: { x: trunkEndX, y: TRUNK_Y }, data: {} }
@@ -211,7 +217,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
       dateTicks.push({ x: dateToX(rangeStart, d), label: shortDate(d) });
       lastTick = d;
     }
-    dateTicks.push({ x: 1740, label: 'Future Growth' });
+    dateTicks.push({ x: trunkEndX - 220, label: 'Future Growth' });
 
     e.push({
       id: 'edge-trunk',
@@ -565,9 +571,25 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
     }
 
     // 5. USER-CREATED BRANCHES — ALTERNATE CLEANLY UP (-1) -> DOWN (+1)
-    const extraBranches = graph.branches.filter((b) => b.id !== 'br_0' && b.id !== 'br_1');
+    let lastResolutionX = 0;
+    for (const item of resolutions) {
+      const branchId = item.id.slice(3);
+      const x = Math.max(dateToX(rangeStart, item.date), lastResolutionX + 185);
+      lastResolutionX = x;
+      const branch = graph.branches.find(({ id }) => id === branchId);
+      n.push({
+        id: item.id, type: 'timelineResolution', position: { x: x - 14, y: TRUNK_Y - 14 },
+        data: { title: branch?.title ?? item.statement, dateLabel: shortDate(item.date),
+                onClick: () => onSelectBranch(branchId) },
+      });
+    }
     extraBranches.forEach((cb, idx) => {
       const detail = branchDetailsMap[cb.id];
+      const factorCount = detail?.hypotheses.length;
+      const branchKind = cb.branch_type === 'habit' ? 'Habit' : 'Investigation';
+      const branchSummary = detail?.guidance ? 'Guidance' : factorCount === undefined
+        ? 'Workspace'
+        : `${factorCount} ${factorCount === 1 ? 'factor' : 'factors'}`;
       const side: -1 | 1 = idx % 2 === 0 ? -1 : 1;
       const startX = 1460 + idx * 240;
       const hubX = startX + 160;
@@ -588,7 +610,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
             status: cb.status,
             branchType: cb.branch_type,
             labelSide: side === -1 ? 'above' : 'below',
-            subtitle: `${cb.branch_type === 'habit' ? 'Habit' : 'Investigation'} · New · ${detail?.hypotheses.length ?? 2} sub-branches`,
+            subtitle: `${branchKind} · New · ${branchSummary}`,
             isSelected: selectedBranchId === cb.id,
             onSelect: onSelectBranch,
           },
@@ -614,8 +636,8 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
           data: {
             rank: hyp.rank,
             label: hyp.label ?? hyp.text ?? 'Sub-branch',
-            confidence: hyp.confidence ?? 45,
-            detail: hyp.test,
+            confidence: hyp.confidence,
+            detail: hyp.claims[0]?.text ?? hyp.test,
             tone: sIdx === 0 ? 'emerald' : 'cyan',
             compact: true,
             onClick: () => onSelectBranch(cb.id),

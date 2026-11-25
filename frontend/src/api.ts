@@ -7,7 +7,9 @@ import sampleAsk from './contracts/sample_ask.json';
 import sampleInsights from './contracts/sample_insights.json';
 import type {
   AskResponse,
+  BranchAction,
   BranchDetailResponse,
+  BranchDraftContext,
   CreateBranchInput,
   ExperimentInfo,
   GraphBranch,
@@ -15,6 +17,7 @@ import type {
   ImportSummary,
   InsightsResponse,
   RecordDetailResponse,
+  WorkspaceHistoryEntry,
 } from './types';
 
 export const USE_MOCK = false;
@@ -201,7 +204,7 @@ export const api = {
     return res.json();
   },
 
-  async createBranch(input: CreateBranchInput): Promise<{ branch: GraphBranch; detail: BranchDetailResponse }> {
+  async createBranch(input: CreateBranchInput): Promise<{ branch: GraphBranch; detail: BranchDetailResponse; draft_error?: string }> {
     if (USE_MOCK) {
       await delay(280);
       const id = `br_custom_${customBranches.length + 2}`;
@@ -299,36 +302,58 @@ export const api = {
     return res.json();
   },
 
-  async transcribeVoiceWithElevenLabs(audioBlob: Blob, apiKey?: string): Promise<string> {
-    // 1. Direct ElevenLabs Scribe STT if user provides a key in session/localStorage
-    if (apiKey && apiKey.trim().length > 8) {
-      const form = new FormData();
-      form.append('file', audioBlob, 'roottrace-voice.webm');
-      form.append('model_id', 'scribe_v1');
-      const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
-        method: 'POST',
-        headers: { 'xi-api-key': apiKey.trim() },
-        body: form,
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.text) return data.text as string;
-      }
+  async getBranchDraftContext(id: string): Promise<BranchDraftContext> {
+    const res = await fetch(`${API_BASE}/api/branches/${encodeURIComponent(id)}/drafts`, { credentials: 'include' });
+    if (!res.ok) throw new Error('Could not load Gemini drafts.');
+    return res.json();
+  },
+
+  async generateBranchDrafts(id: string): Promise<{ detail: BranchDetailResponse; context: BranchDraftContext }> {
+    const res = await fetch(`${API_BASE}/api/branches/${encodeURIComponent(id)}/drafts`, {
+      method: 'POST', credentials: 'include',
+    });
+    if (!res.ok) {
+      const failure = await res.json().catch(() => ({}));
+      throw new Error(typeof failure.detail === 'string' ? failure.detail : 'Could not generate Gemini drafts.');
     }
-    // 2. Backend proxy if running against real backend
-    if (!USE_MOCK) {
-      const form = new FormData();
-      form.append('audio', audioBlob, 'voice.webm');
-      const res = await fetch(`${API_BASE}/api/voice/transcribe`, {
-        method: 'POST',
-        body: form,
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.transcript) return data.transcript as string;
-      }
+    return res.json();
+  },
+
+  async getBranchHistory(): Promise<WorkspaceHistoryEntry[]> {
+    if (USE_MOCK) return [];
+    const res = await fetch(`${API_BASE}/api/branches/history`, { credentials: 'include' });
+    if (!res.ok) throw new Error('Could not load workspace branch history.');
+    return res.json();
+  },
+
+  async transitionBranch(id: string, action: BranchAction, resolution?: string): Promise<{
+    graph: GraphResponse; detail: BranchDetailResponse; history: WorkspaceHistoryEntry[];
+  }> {
+    const res = await fetch(`${API_BASE}/api/branches/${encodeURIComponent(id)}/transition`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, resolution }),
+    });
+    if (!res.ok) {
+      const failure = await res.json().catch(() => ({}));
+      throw new Error(typeof failure.detail === 'string' ? failure.detail : 'Could not close this branch.');
     }
-    throw new Error('NO_DIRECT_STT');
+    return res.json();
+  },
+
+  async transcribeVoiceWithElevenLabs(audioBlob: Blob): Promise<string> {
+    const form = new FormData();
+    form.append('audio', audioBlob, 'check-in');
+    const res = await fetch(`${API_BASE}/api/voice/transcribe`, {
+      method: 'POST', credentials: 'include', body: form,
+    });
+    if (!res.ok) {
+      const failure = await res.json().catch(() => ({}));
+      throw new Error(typeof failure.detail === 'string' ? failure.detail : 'ElevenLabs transcription failed.');
+    }
+    const { transcript } = await res.json();
+    return transcript;
   },
 
   async getRecord(id: string): Promise<RecordDetailResponse> {
@@ -446,36 +471,21 @@ export const api = {
 };
 
 const ttsAudioCache = new Map<string, string>();
-const DEFAULT_ELEVENLABS_VOICE_ID = '21m00Tcm4TlvDq8ikWAM'; // Rachel (clear warm voice)
-
-export async function synthesizeWithElevenLabs(text: string, apiKey?: string): Promise<string> {
-  const cacheKey = `${apiKey?.slice(-6) ?? 'none'}::${text}`;
-  const cached = ttsAudioCache.get(cacheKey);
+export async function synthesizeWithElevenLabs(text: string): Promise<string> {
+  const cached = ttsAudioCache.get(text);
   if (cached) return cached;
 
-  if (apiKey && apiKey.trim().length > 8) {
-    const res = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${DEFAULT_ELEVENLABS_VOICE_ID}`,
-      {
-        method: 'POST',
-        headers: {
-          'xi-api-key': apiKey.trim(),
-          'Content-Type': 'application/json',
-          Accept: 'audio/mpeg',
-        },
-        body: JSON.stringify({
-          text,
-          model_id: 'eleven_turbo_v2_5',
-          voice_settings: { stability: 0.55, similarity_boost: 0.78 },
-        }),
-      }
-    );
-    if (res.ok) {
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      ttsAudioCache.set(cacheKey, url);
-      return url;
-    }
+  const res = await fetch(`${API_BASE}/api/voice/synthesize`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) {
+    const failure = await res.json().catch(() => ({}));
+    throw new Error(typeof failure.detail === 'string' ? failure.detail : 'ElevenLabs narration unavailable.');
   }
-  throw new Error('FALLBACK_WEB_SPEECH');
+  const url = URL.createObjectURL(await res.blob());
+  ttsAudioCache.set(text, url);
+  return url;
 }

@@ -259,7 +259,7 @@ export const SubHypothesisNode: React.FC<NodeProps> = ({ data }) => {
   const d = data as {
     rank: number;
     label: string;
-    confidence: number;
+    confidence?: number;
     detail: string;
     tone: 'emerald' | 'cyan' | 'muted' | 'solved';
     compact?: boolean;
@@ -301,8 +301,11 @@ export const SubHypothesisNode: React.FC<NodeProps> = ({ data }) => {
           <span className={`${d.compact ? 'text-[11.5px]' : 'text-[12.5px]'} font-semibold text-t1 truncate`}>
             {d.compact ? d.label : `${d.rank}. ${d.label}`}
           </span>
-          <span className="font-mono text-[10.5px] font-bold" style={{ color: accent.text }}>
-            {d.confidence}%
+          <span
+            className="shrink-0 font-mono text-[10.5px]"
+            style={{ color: d.confidence === undefined ? 'var(--t3)' : accent.text }}
+          >
+            {d.confidence === undefined ? 'Unscored' : `${d.confidence}%`}
           </span>
         </div>
         <p className="mt-0.5 font-mono text-[9px] text-t3 truncate">{d.detail}</p>
@@ -374,6 +377,26 @@ export const EvidenceDewdropNode: React.FC<NodeProps> = ({ data }) => {
       <FileText className="w-3 h-3 text-evi shrink-0" />
       <span className="font-mono text-[9.5px] font-bold text-evi">{d.recordId}</span>
       <span className="font-mono text-[9.5px] text-t2">{d.summary}</span>
+    </button>
+  );
+};
+
+export const TimelineResolutionNode: React.FC<NodeProps> = ({ data }) => {
+  const { title, dateLabel, onClick } = data as { title: string; dateLabel: string; onClick: () => void };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="group relative flex h-7 w-7 items-center justify-center rounded-full border border-branchOpen bg-s1 text-branchOpen"
+    >
+      <GitMerge className="h-4 w-4" />
+      <span
+        className="absolute bottom-9 left-1/2 w-[172px] -translate-x-1/2 rounded-xl border border-border bg-s1 px-3 py-2 text-left shadow-lg"
+      >
+        <span className="block truncate text-[12px] font-semibold text-t1">{title}</span>
+        <span className="block font-mono text-[9px] text-branchOpen">Resolved note · {dateLabel}</span>
+      </span>
     </button>
   );
 };

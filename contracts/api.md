@@ -5,7 +5,7 @@ Frontend dev origin (add to FastAPI CORSMiddleware): `http://localhost:5173`
 
 ## Endpoints
 - `GET /api/graph` -> matches `contracts/sample_graph.json`
-- `GET /api/branches/{id}` -> matches `contracts/sample_branch.json`
+- `GET /api/branches/{id}` -> matches `contracts/sample_branch.json` for demo branches. A workspace branch that returns local guidance has a `guidance` object with `title` and `message`, and empty `hypotheses` and `evidence` arrays. See `contracts/sample_workspace_guidance.json`.
 - `GET /api/records/{id}` -> matches `contracts/sample_record.json`
 - `POST /api/experiments/{id}/lock` -> locks `success_criterion`, sets `locked=true`, `locked_at`
 - `POST /api/demo/advance` -> body `{"days": number}`, returns updated `GET /api/graph` shape

@@ -102,6 +102,25 @@ export interface BranchDetailResponse {
   hypotheses: BranchHypothesis[];
   experiment?: ExperimentInfo;
   evidence: EvidenceRow[];
+  guidance?: { title: string; message: string };
+}
+
+export interface BranchDraftContext {
+  can_generate: boolean;
+  sent_to_ai: string;
+  related_resolutions: Array<{ id: string; title: string; date: string; note: string }>;
+}
+
+export type BranchAction = 'resolve' | 'dissolve';
+
+export interface WorkspaceHistoryEntry {
+  id: string;
+  title: string;
+  branch_type: 'investigation' | 'habit';
+  start_date: string;
+  lifecycle: 'open' | 'resolved' | 'dissolved';
+  closed_date: string | null;
+  resolution: string | null;
 }
 
 export interface CreateBranchInput {
@@ -109,9 +128,11 @@ export interface CreateBranchInput {
   branch_type: 'investigation' | 'habit';
   start_date: string;
   metrics: string[];
+  outcome?: 'auto' | 'headache' | 'sleep_min' | 'afternoon_energy' | 'untracked';
   hypotheses: string[];
   created_via: 'manual' | 'elevenlabs_voice';
   voice_transcript?: string;
+  generate_drafts?: boolean;
 }
 
 export interface RecordDetailResponse {

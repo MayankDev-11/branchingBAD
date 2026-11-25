@@ -3,7 +3,6 @@ import ReactDOM from 'react-dom';
 import {
   CheckCircle2,
   FlaskConical,
-  KeyRound,
   Mic,
   Plus,
   Repeat,
@@ -23,7 +22,14 @@ interface NewBranchModalProps {
   onCreate: (input: CreateBranchInput) => Promise<void>;
 }
 
-const METRIC_OPTIONS = ['sleep_min', 'water_ml', 'steps', 'headache', 'late_screen_min', 'caffeine'];
+const METRIC_OPTIONS = [
+  ['sleep_min', 'Sleep'],
+  ['water_ml', 'Water intake'],
+  ['steps', 'Steps'],
+  ['headache', 'Headache'],
+  ['late_screen_min', 'Late screen time'],
+  ['caffeine', 'Late caffeine'],
+] as const;
 
 const VOICE_PRESETS = [
   {
@@ -34,7 +40,7 @@ const VOICE_PRESETS = [
       title: 'Why do I crash at 3 PM every afternoon?',
       branch_type: 'investigation' as const,
       metrics: ['sleep_min', 'steps'],
-      hypotheses: ['Heavy carb lunch spike', 'Accumulated sleep debt', 'Sedentary afternoon'],
+      hypotheses: [],
     },
   },
   {
@@ -45,7 +51,7 @@ const VOICE_PRESETS = [
       title: 'Walk 25 min every morning before 9 AM',
       branch_type: 'habit' as const,
       metrics: ['steps', 'sleep_min'],
-      hypotheses: ['Morning sunlight & step cue', 'Higher afternoon energy'],
+      hypotheses: [],
     },
   },
 ];
@@ -70,7 +76,6 @@ function extractStructuredFromTranscript(transcript: string): {
   if (lower.includes('headache')) metrics.push('headache');
   if (lower.includes('screen') || lower.includes('phone')) metrics.push('late_screen_min');
   if (lower.includes('coffee') || lower.includes('caffeine') || lower.includes('chai')) metrics.push('caffeine');
-  if (metrics.length === 0) metrics.push('sleep_min');
 
   const cleanedTitle = transcript
     .replace(/^(create|start|log|add)\s+(a\s+)?(new\s+)?(branch|habit|investigation)\s*(for|to|about)?\s*/i, '')
@@ -78,19 +83,12 @@ function extractStructuredFromTranscript(transcript: string): {
   const shortTitle =
     cleanedTitle.length > 58 ? `${cleanedTitle.slice(0, 56).trim()}…` : cleanedTitle || 'New health investigation';
 
-  const hypotheses = isHabit
-    ? ['Consistent morning cue', 'Sustained energy gain']
-    : [
-        metrics.includes('sleep_min') ? 'Prior-night sleep debt' : 'Baseline metric shift',
-        metrics.includes('water_ml') ? 'Low daytime hydration' : 'Meal / routine timing',
-        'Contextual stress confounder',
-      ];
 
   return {
     title: shortTitle,
     branch_type: isHabit ? 'habit' : 'investigation',
     metrics,
-    hypotheses,
+    hypotheses: [],
   };
 }
 
@@ -103,21 +101,38 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
   const [mode, setMode] = useState<'manual' | 'voice'>(initialMode);
   const [branchType, setBranchType] = useState<'investigation' | 'habit'>('investigation');
   const [title, setTitle] = useState('');
-  const [selectedMetrics, setSelectedMetrics] = useState<string[]>(['sleep_min']);
-  const [hypInput, setHypInput] = useState('Prior-night sleep debt, Low water intake, Late-night screen');
+  const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
+  const [hypInput, setHypInput] = useState('');
+  const [outcome, setOutcome] = useState<NonNullable<CreateBranchInput['outcome']>>('auto');
   const [startDate, setStartDate] = useState('2026-11-18');
   const [submitting, setSubmitting] = useState(false);
 
   // Voice + ElevenLabs state
-  const [isRecording, setIsRecording] = useState(false);
+  const [voicePhase, setVoicePhase] = useState<'idle' | 'requesting' | 'recording' | 'transcribing'>('idle');
   const [transcript, setTranscript] = useState('');
-  const [voiceStatus, setVoiceStatus] = useState<string>('Ready · Tap mic to speak or pick a quick voice sample');
-  const [elevenKey, setElevenKey] = useState(() => localStorage.getItem('elevenlabs_api_key') ?? '');
-  const [showKeyBox, setShowKeyBox] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState('');
+  const isRecording = voicePhase === 'recording';
+  const voiceBusy = voicePhase !== 'idle';
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const speechRecRef = useRef<any>(null);
+  const captureVersion = useRef(0);
+
+  useEffect(() => {
+    setVoicePhase('idle');
+    setVoiceStatus('');
+    return () => {
+      captureVersion.current += 1;
+      const recorder = mediaRecorderRef.current;
+      if (recorder) {
+        recorder.onstop = null;
+        recorder.ondataavailable = null;
+        recorder.onerror = null;
+        if (recorder.state !== 'inactive') recorder.stop();
+        recorder.stream.getTracks().forEach((track) => track.stop());
+      }
+      mediaRecorderRef.current = null;
+    };
+  }, [open, mode]);
 
   useEffect(() => {
     setMode(initialMode);
@@ -135,7 +150,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
 
   const toggleMetric = (m: string) => {
     setSelectedMetrics((prev) =>
-      prev.includes(m) ? (prev.length > 1 ? prev.filter((x) => x !== m) : prev) : [...prev, m]
+      prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]
     );
   };
 
@@ -149,6 +164,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
     setBranchType(parsed.branch_type);
     setSelectedMetrics(parsed.metrics);
     setHypInput(parsed.hypotheses.join(', '));
+    setOutcome('auto');
   };
 
   const speakConfirmation = (text: string) => {
@@ -161,97 +177,98 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
   };
 
   const startVoiceCapture = async () => {
-    setTranscript('');
-    setIsRecording(true);
-    setVoiceStatus('Listening via microphone (ElevenLabs Scribe / Browser Speech fallback)...');
-
-    // Start Browser SpeechRecognition in parallel for instant live captions
-    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRec) {
-      try {
-        const rec = new SpeechRec();
-        rec.lang = 'en-IN';
-        rec.continuous = true;
-        rec.interimResults = true;
-        rec.onresult = (event: any) => {
-          let combined = '';
-          for (let i = 0; i < event.results.length; i++) {
-            combined += event.results[i][0].transcript;
-          }
-          setTranscript(combined.trim());
-        };
-        rec.start();
-        speechRecRef.current = rec;
-      } catch {
-        // Fallback handled on stop
-      }
+    if (voiceBusy) return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setVoiceStatus('Microphone recording requires a supported browser on localhost or HTTPS.');
+      return;
     }
+    const version = ++captureVersion.current;
+    setTranscript('');
+    setVoicePhase('requesting');
+    setVoiceStatus('Allow microphone access if your browser asks.');
 
-    // Record audio buffer for ElevenLabs STT (RAM-only, discarded after transcription)
+    let stream: MediaStream | undefined;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
-      chunksRef.current = [];
-      mr.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (captureVersion.current !== version) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      const releaseRecorder = () => {
+        recorder.stream.getTracks().forEach((track) => track.stop());
+        mediaRecorderRef.current = null;
       };
-      mr.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        chunksRef.current = []; // Immediately discard audio chunks from RAM
+      recorder.ondataavailable = ({ data }) => {
+        if (data.size > 0) chunks.push(data);
+      };
+      recorder.onerror = () => {
+        recorder.onstop = null;
+        recorder.ondataavailable = null;
+        chunks.length = 0;
+        releaseRecorder();
+        setVoicePhase('idle');
+        setVoiceStatus('Recording was interrupted. Check your microphone and try again.');
+      };
+      recorder.onstop = async () => {
+        releaseRecorder();
+        if (captureVersion.current !== version) return;
+        const blob = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || 'audio/webm' });
+        chunks.length = 0;
         try {
-          setVoiceStatus('Transcribing via ElevenLabs Scribe STT...');
-          const text = await api.transcribeVoiceWithElevenLabs(blob, elevenKey);
+          if (!blob.size) {
+            setVoiceStatus('No audio was captured. Start a new recording and speak before stopping.');
+            return;
+          }
+          setVoicePhase('transcribing');
+          setVoiceStatus('Transcribing with ElevenLabs…');
+          const text = await api.transcribeVoiceWithElevenLabs(blob);
+          if (captureVersion.current !== version) return;
           setTranscript(text);
           const parsed = extractStructuredFromTranscript(text);
           applyParsedDraft(parsed);
           setVoiceStatus('Transcribed via ElevenLabs Scribe · Review & approve branch below');
           speakConfirmation(`Drafted ${parsed.branch_type} branch: ${parsed.title}`);
-        } catch {
-          // Use browser speech transcript if available
-          setTranscript((prev) => {
-            const finalTxt =
-              prev.trim() ||
-              'Why do I feel sluggish after lunch even when I sleep okay? Check lunch timing and afternoon steps.';
-            const parsed = extractStructuredFromTranscript(finalTxt);
-            applyParsedDraft(parsed);
-            setVoiceStatus('Transcript ready (browser fallback) · Review & approve branch below');
-            return finalTxt;
-          });
+        } catch (error) {
+          if (captureVersion.current === version) {
+            setVoiceStatus(error instanceof Error ? error.message : 'Transcription failed. Try again or type the branch.');
+          }
+        } finally {
+          if (captureVersion.current === version) setVoicePhase('idle');
         }
       };
-      mr.start();
-      mediaRecorderRef.current = mr;
-    } catch {
-      setVoiceStatus('Mic permission unavailable — tap a Demo Voice Sample below to test');
-      setIsRecording(false);
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setVoicePhase('recording');
+      setVoiceStatus('Recording. Speak, then select Stop and transcribe.');
+    } catch (error) {
+      stream?.getTracks().forEach((track) => track.stop());
+      if (captureVersion.current !== version) return;
+      setVoicePhase('idle');
+      const name = error instanceof DOMException ? error.name : '';
+      if (name === 'NotAllowedError') {
+        setVoiceStatus('Microphone access is blocked. Allow it in this site’s permissions and try again.');
+      } else if (name === 'NotFoundError') {
+        setVoiceStatus('No microphone was found. Connect or enable one and try again.');
+      } else {
+        setVoiceStatus('Could not start the microphone. Check your browser or system input settings.');
+      }
     }
   };
 
   const stopVoiceCapture = () => {
-    setIsRecording(false);
-    if (speechRecRef.current) {
-      try {
-        speechRecRef.current.stop();
-      } catch {
-        // ignore
-      }
-      speechRecRef.current = null;
-    }
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    } else if (transcript.trim()) {
-      const parsed = extractStructuredFromTranscript(transcript);
-      applyParsedDraft(parsed);
-      setVoiceStatus('Parsed voice draft ready · Confirm to grow on graph');
-    }
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === 'inactive') return;
+    setVoicePhase('transcribing');
+    setVoiceStatus('Preparing recording…');
+    recorder.stop();
   };
 
   const runVoicePreset = (preset: (typeof VOICE_PRESETS)[number]) => {
-    setIsRecording(false);
     setTranscript(preset.transcript);
     applyParsedDraft(preset.parsed);
-    setVoiceStatus('ElevenLabs Voice Draft Ready · Confirm below to grow on your graph');
+    setVoiceStatus('Sample voice draft ready · Review before creating the branch');
     speakConfirmation(`Drafted ${preset.parsed.branch_type} branch: ${preset.parsed.title}`);
   };
 
@@ -269,11 +286,15 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
         branch_type: branchType,
         start_date: startDate,
         metrics: selectedMetrics,
+        outcome,
         hypotheses: hyps,
+        generate_drafts: branchType === 'investigation' && hyps.length === 0,
         created_via: mode === 'voice' ? 'elevenlabs_voice' : 'manual',
         voice_transcript: mode === 'voice' ? transcript : undefined,
       });
       setTitle('');
+      setHypInput('');
+      setOutcome('auto');
       setTranscript('');
       onClose();
     } finally {
@@ -352,38 +373,18 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
                 <Volume2 className="w-3.5 h-3.5" />
                 ELEVENLABS VOICE BRANCH CAPTURE
               </span>
-              <button
-                type="button"
-                onClick={() => setShowKeyBox((v) => !v)}
-                className="inline-flex items-center gap-1 font-mono text-[9.5px] text-t3 hover:text-t1"
-              >
-                <KeyRound className="w-3 h-3" />
-                {elevenKey ? 'API key set' : 'Optional API key'}
-              </button>
             </div>
-
-            {showKeyBox && (
-              <div className="flex items-center gap-2">
-                <input
-                  type="password"
-                  value={elevenKey}
-                  onChange={(e) => {
-                    setElevenKey(e.target.value);
-                    localStorage.setItem('elevenlabs_api_key', e.target.value);
-                  }}
-                  placeholder="Paste ElevenLabs xi-api-key (stays in browser only)"
-                  className="flex-1 px-3 py-1.5 rounded-lg font-mono text-[11px] text-t1 bg-s1 border focus:outline-none"
-                  style={{ borderColor: 'var(--border)' }}
-                />
-              </div>
-            )}
+            <p className="text-[11px] text-t3">
+              Recording sends your clip to ElevenLabs for transcription. Use a demo sample or type to keep the input local.
+            </p>
 
             {/* Big Interactive Mic Button + Live Waveform */}
             <div className="flex flex-col items-center py-2">
               <button
                 type="button"
                 onClick={isRecording ? stopVoiceCapture : startVoiceCapture}
-                className="w-16 h-16 rounded-full flex items-center justify-center transition-transform hover:scale-105"
+                disabled={voiceBusy && !isRecording}
+                className="flex items-center gap-2 rounded-full px-4 py-2.5 text-[12.5px] font-semibold disabled:opacity-50"
                 style={{
                   backgroundColor: isRecording ? 'var(--change)' : 'var(--trunk)',
                   color: isRecording ? '#ffffff' : 'var(--btn-ink)',
@@ -392,9 +393,10 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
                     : '0 0 24px var(--trunk-glow)',
                 }}
               >
-                {isRecording ? <Square className="w-6 h-6 fill-current" /> : <Mic className="w-7 h-7" />}
+                {isRecording ? <Square className="h-4 w-4 fill-current" /> : <Mic className="h-4 w-4" />}
+                {isRecording ? 'Stop and transcribe' : 'Start recording'}
               </button>
-              <p className="mt-2.5 font-mono text-[10.5px] text-t2 text-center">{voiceStatus}</p>
+              {voiceStatus && <p role="status" className="mt-2.5 text-[11px] text-t2 text-center">{voiceStatus}</p>}
 
               {/* Quick Demo Voice Samples */}
               <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
@@ -404,6 +406,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
                     key={p.label}
                     type="button"
                     onClick={() => runVoicePreset(p)}
+                    disabled={voiceBusy}
                     className="px-2.5 py-1 rounded-full font-mono text-[10px] text-t2 hover:text-t1 transition-colors"
                     style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border)' }}
                   >
@@ -494,16 +497,35 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
           {/* Sub-branches (Hypotheses) */}
           <div>
             <label className="block font-mono text-[10px] uppercase text-t3 mb-1.5">
-              Initial Sub-Branches (comma-separated, 2–3 competing explanations)
+              Possible factors (optional, comma-separated)
             </label>
             <input
               type="text"
+              placeholder="Leave blank for Gemini drafts on a supported outcome"
               value={hypInput}
               onChange={(e) => setHypInput(e.target.value)}
               className="w-full px-3.5 py-2 rounded-xl font-mono text-[11.5px] text-t2 focus:outline-none"
               style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
             />
           </div>
+
+          {branchType === 'investigation' && (
+            <label className="block space-y-1.5">
+              <span className="block font-mono text-[10px] uppercase text-t3">Outcome to explain</span>
+              <select
+                value={outcome}
+                onChange={(e) => setOutcome(e.target.value as NonNullable<CreateBranchInput['outcome']>)}
+                className="w-full rounded-lg px-2.5 py-1.5 text-[11px] text-t1"
+                style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border-strong)' }}
+              >
+                <option value="auto">Infer from my question</option>
+                <option value="headache">Headache days</option>
+                <option value="sleep_min">Short sleep</option>
+                <option value="afternoon_energy">Afternoon energy (no demo readings)</option>
+                <option value="untracked">Other outcome</option>
+              </select>
+            </label>
+          )}
 
           {/* Tracked Metrics & Start Date */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -512,7 +534,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
                 Metrics to Link
               </label>
               <div className="flex flex-wrap gap-1.5">
-                {METRIC_OPTIONS.map((m) => {
+                {METRIC_OPTIONS.map(([m, label]) => {
                   const active = selectedMetrics.includes(m);
                   return (
                     <button
@@ -526,7 +548,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
                         border: active ? '1px solid var(--branch-open)' : '1px solid var(--border)',
                       }}
                     >
-                      {m}
+                      {label}
                     </button>
                   );
                 })}
@@ -563,7 +585,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
               style={{ backgroundColor: 'var(--trunk)', color: 'var(--btn-ink)' }}
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>{submitting ? 'Growing branch...' : 'Approve & Grow Branch'}</span>
+              <span>{submitting ? 'Saving branch and checking evidence…' : 'Approve & Grow Branch'}</span>
             </button>
           </div>
         </form>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -13,8 +13,9 @@ import {
   Volume2,
   X,
 } from 'lucide-react';
-import { synthesizeWithElevenLabs } from '../../api';
-import type { AskResponse, BranchDetailResponse, BranchHypothesis } from '../../types';
+import { api, synthesizeWithElevenLabs } from '../../api';
+import { readAskAudit } from '../../askAudit';
+import type { AskResponse, BranchAction, BranchDetailResponse, BranchDraftContext, BranchHypothesis } from '../../types';
 
 interface InvestigationPanelProps {
   branch: BranchDetailResponse | null;
@@ -24,6 +25,9 @@ interface InvestigationPanelProps {
   onClearAsk: () => void;
   onOpenRecord: (recordId: string, tab?: 'raw' | 'ai') => void;
   onLockExperiment: (expId: string) => void;
+  onBranchTransition: (id: string, action: BranchAction, resolution?: string) => Promise<void>;
+  resolution: string | null;
+  onGenerateDrafts: (id: string) => Promise<BranchDraftContext>;
 }
 
 const ConfidenceRing: React.FC<{ value: number; rank: number }> = ({ value, rank }) => {
@@ -64,10 +68,12 @@ const ConfidenceRing: React.FC<{ value: number; rank: number }> = ({ value, rank
 const HypothesisCard: React.FC<{
   hyp: BranchHypothesis;
   defaultExpanded: boolean;
+  testLabel?: string;
+  workspace?: boolean;
   onOpenRecord: (id: string) => void;
-}> = ({ hyp, defaultExpanded, onOpenRecord }) => {
+}> = ({ hyp, defaultExpanded, testLabel = 'Test', workspace = false, onOpenRecord }) => {
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const pct = hyp.confidence ?? (hyp.rank === 1 ? 72 : hyp.rank === 2 ? 41 : 28);
+  const pct = hyp.confidence;
   const borderColor =
     hyp.rank === 1
       ? 'rgba(16, 185, 129, 0.35)'
@@ -76,7 +82,9 @@ const HypothesisCard: React.FC<{
       : 'rgba(255, 77, 109, 0.28)';
 
   const badge =
-    pct >= 60
+    pct === undefined
+      ? null
+      : pct >= 60
       ? { label: 'Top finding', color: 'var(--ok)', bg: 'rgba(16,185,129,0.12)', icon: <Check className="w-3 h-3" /> }
       : pct >= 40
       ? { label: 'Moderate', color: 'var(--amb)', bg: 'rgba(245,158,11,0.12)', icon: <HelpCircle className="w-3 h-3" /> }
@@ -110,22 +118,25 @@ const HypothesisCard: React.FC<{
               <h4 className="text-[13.5px] font-semibold text-t1">
                 {hyp.label ?? hyp.text}
               </h4>
-              <span
+              {badge && <span
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
                 style={{ backgroundColor: badge.bg, color: badge.color }}
               >
                 {badge.icon}
                 {badge.label}
-              </span>
+              </span>}
+              {workspace && pct === undefined && (
+                <span className="text-[10px] font-semibold text-t3">Unscored</span>
+              )}
             </div>
-            <p className="mt-1 text-[11.5px] text-t2 leading-relaxed">
+            {!expanded && <p className="mt-1 text-[11.5px] text-t2 leading-relaxed">
               {hyp.claims[0]?.text ?? `No direct claims yet · Proposed: ${hyp.test}`}
-            </p>
+            </p>}
           </div>
         </div>
 
         <div className="flex items-center gap-1">
-          <ConfidenceRing value={pct} rank={hyp.rank} />
+          {pct !== undefined && <ConfidenceRing value={pct} rank={hyp.rank} />}
           {expanded ? (
             <ChevronUp className="w-4 h-4 text-t3" />
           ) : (
@@ -161,15 +172,15 @@ const HypothesisCard: React.FC<{
             ))
           ) : (
             <p className="font-mono text-[10.5px] text-t3">
-              No verified record links yet. Log 7+ days to evaluate.
+              No matching record links yet.
             </p>
           )}
-          <div
-            className="rounded-lg px-2.5 py-1.5 font-mono text-[10.5px] text-t2"
+          {hyp.test && <div
+            className="whitespace-pre-line rounded-lg px-2.5 py-1.5 font-mono text-[10.5px] text-t2"
             style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
           >
-            Test: {hyp.test}
-          </div>
+            {testLabel}: {hyp.test}
+          </div>}
         </div>
       )}
     </div>
@@ -184,8 +195,62 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   onClearAsk,
   onOpenRecord,
   onLockExperiment,
+  onBranchTransition,
+  resolution,
+  onGenerateDrafts,
 }) => {
   const [speakingSummary, setSpeakingSummary] = useState(false);
+  const [loadingAudio, setLoadingAudio] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
+  const [audioMessage, setAudioMessage] = useState('');
+  const branchAudio = useRef<HTMLAudioElement | null>(null);
+  const playbackRequest = useRef(0);
+  const [action, setAction] = useState<BranchAction | null>(null);
+  const [resolutionNote, setResolutionNote] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [closing, setClosing] = useState(false);
+
+  const [draftContext, setDraftContext] = useState<BranchDraftContext | null>(null);
+  const [draftRequestId, setDraftRequestId] = useState<string | null>(null);
+  const [draftError, setDraftError] = useState<{ id: string; message: string } | null>(null);
+
+  const workspaceBranchId = branch?.id.startsWith('br_custom_') ? branch.id : null;
+  const currentDraftBranch = useRef(workspaceBranchId);
+  currentDraftBranch.current = workspaceBranchId;
+  useEffect(() => {
+    let current = true;
+    setDraftContext(null);
+    if (workspaceBranchId) {
+      void api.getBranchDraftContext(workspaceBranchId).then((context) => {
+        if (current) setDraftContext(context);
+      }).catch(() => {
+        if (current) setDraftError({ id: workspaceBranchId, message: 'Could not load branch drafts.' });
+      });
+    }
+    return () => { current = false; };
+  }, [workspaceBranchId, branch?.status]);
+  useEffect(() => {
+    setAction(null);
+    setResolutionNote('');
+    setActionError('');
+  }, [branch?.id]);
+
+
+  useEffect(() => {
+    const player = branchAudio.current;
+    setSpeakingSummary(false);
+    setLoadingAudio(false);
+    setAudioReady(false);
+    setAudioMessage('');
+    return () => {
+      playbackRequest.current += 1;
+      if (player) {
+        player.pause();
+        player.removeAttribute('src');
+        player.load();
+      }
+    };
+  }, [branch, askResult]);
 
   // 1. RED FLAG SAFETY SCREEN (blocks AI output completely)
   if (askResult?.red_flag) {
@@ -242,6 +307,8 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
 
   // 2. ASK RESPONSE VIEW
   if (askResult && askQuestion) {
+    const { provider } = readAskAudit(askResult.sent_to_ai);
+    const hasEvidence = askResult.hypotheses.length > 0;
     return (
       <aside
         className="w-[448px] shrink-0 h-full overflow-y-auto flex flex-col"
@@ -266,7 +333,11 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 font-mono text-[9.5px] text-branchOpen">
                 <Sparkles className="w-3 h-3" />
-                <span>BEDROCK HAIKU · CITATION-CHECKED</span>
+                <span className="uppercase">
+                  {provider ? `${provider} · Citation-checked` :
+                    askResult.sent_to_ai ? 'Citation-checked' :
+                    hasEvidence ? 'Python · Demo evidence' : 'Ask RootTrace'}
+                </span>
               </div>
               <h2 className="font-serif italic text-[17px] text-t1 truncate">{askQuestion}</h2>
             </div>
@@ -274,7 +345,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
 
           <button
             type="button"
-            disabled={!askResult.hypotheses[0]?.claims[0]?.record_ids[0]}
+            disabled={!askResult.sent_to_ai || !askResult.hypotheses[0]?.claims[0]?.record_ids[0]}
             onClick={() => {
               const rid = askResult.hypotheses[0]?.claims[0]?.record_ids[0];
               if (rid) onOpenRecord(rid, 'ai');
@@ -304,23 +375,33 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
             </div>
           )}
 
-          <div className="font-mono text-[9.5px] uppercase tracking-wider text-t3">
-            Ranked Explanations (Click Any Record ID)
-          </div>
+          {hasEvidence ? (
+            <div className="font-mono text-[9.5px] uppercase tracking-wider text-t3">Answer from demo evidence</div>
+          ) : (
+            <div className="rounded-xl border border-border p-4">
+              <h3 className="text-sm font-semibold text-t1">No matching demo evidence</h3>
+              <p className="mt-2 text-[12px] leading-relaxed text-t2">
+                Try asking “How much did I sleep last week?”, “What does water intake have to do with headaches?”,
+                or “What should I do next?” on a demo investigation.
+              </p>
+            </div>
+          )}
 
           {askResult.hypotheses.map((h) => (
             <HypothesisCard
               key={h.rank}
               hyp={h}
               defaultExpanded={true}
+              testLabel="Next step"
               onOpenRecord={(rid) => onOpenRecord(rid, 'raw')}
             />
           ))}
 
-          <p className="pt-2 font-mono text-[10px] text-t3 leading-relaxed">
-            Personal pattern, not medical advice. Every number above was verified by Python against
-            immutable record IDs before display.
-          </p>
+          {hasEvidence && (
+            <p className="pt-2 font-mono text-[10px] text-t3 leading-relaxed">
+              These findings use synthetic demo records. Open a record ID to inspect the source.
+            </p>
+          )}
         </div>
       </aside>
     );
@@ -328,6 +409,8 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
 
   if (!branch) return null;
 
+  const workspace = branch.id.startsWith('br_custom_');
+  const guidance = branch.guidance;
   const exp = branch.experiment;
   const adherencePct = Math.min(100, Math.max(0, exp?.adherence_pct ?? 0));
   const firstCitedId = branch.hypotheses[0]?.claims[0]?.record_ids[0] ?? branch.change_event?.record_ids[0];
@@ -338,38 +421,80 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   });
 
   const handleSpeakBranch = async () => {
-    if (speakingSummary) {
-      window.speechSynthesis?.cancel();
-      setSpeakingSummary(false);
+    const player = branchAudio.current;
+    if (!player || loadingAudio) return;
+    if (!player.paused) {
+      player.pause();
       return;
     }
-    const top = branch.hypotheses[0];
-    const spoken = top
-      ? `Investigation: ${branch.title}. Top finding is ${top.label ?? top.text} at ${top.confidence ?? 0} percent confidence. ${
-          top.claims[0]?.text ?? 'Not enough data yet'
-        }. ${exp ? `Locked experiment: ${exp.description}, currently at ${adherencePct} percent adherence.` : 'No experiment locked yet.'}`
-      : `Investigation: ${branch.title}. Not enough data yet.`;
-    setSpeakingSummary(true);
+
+    const request = ++playbackRequest.current;
+    setAudioMessage('');
+    if (!audioReady) {
+      const top = branch.hypotheses[0];
+      const spoken = top
+        ? `Investigation: ${branch.title}. ${top.label ?? top.text}.${
+            top.confidence === undefined ? '' : ` The pattern score is ${top.confidence} percent.`
+          } ${top.claims[0]?.text ?? 'Not enough data yet.'}
+          ${exp ? `Locked experiment: ${exp.description}. Adherence: ${adherencePct} percent.` : ''}`
+        : `Investigation: ${branch.title}. Not enough data yet.`;
+      setLoadingAudio(true);
+      try {
+        const url = await synthesizeWithElevenLabs(spoken);
+        if (playbackRequest.current !== request) return;
+        player.src = url;
+        setAudioReady(true);
+      } catch (error) {
+        if (playbackRequest.current === request) {
+          setAudioMessage(error instanceof Error ? error.message : 'ElevenLabs narration unavailable.');
+        }
+        return;
+      } finally {
+        if (playbackRequest.current === request) setLoadingAudio(false);
+      }
+    }
+
     try {
-      const key = localStorage.getItem('elevenlabs_api_key') ?? undefined;
-      const url = await synthesizeWithElevenLabs(spoken, key);
-      const audio = new Audio(url);
-      audio.onended = () => setSpeakingSummary(false);
-      await audio.play();
-    } catch {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(spoken);
-        u.rate = 1.03;
-        u.onend = () => setSpeakingSummary(false);
-        window.speechSynthesis.speak(u);
-      } else {
-        setSpeakingSummary(false);
+      await player.play();
+    } catch (error) {
+      if (playbackRequest.current === request) {
+        setAudioMessage(error instanceof DOMException && error.name === 'NotAllowedError'
+          ? 'Audio is ready. Press Play in the player to listen.'
+          : 'The browser could not play this audio.');
       }
     }
   };
 
   // 3. STANDARD INVESTIGATION DETAIL PANEL (Matches Screenshot 02)
+  const generateDrafts = async () => {
+    const id = branch.id;
+    setDraftError(null);
+    setDraftRequestId(id);
+    try {
+      const context = await onGenerateDrafts(id);
+      if (currentDraftBranch.current === id) setDraftContext(context);
+    } catch (error) {
+      setDraftError({ id, message: error instanceof Error ? error.message : 'Could not generate Gemini drafts.' });
+    } finally {
+      setDraftRequestId((current) => current === id ? null : current);
+    }
+  };
+
+  const confirmTransition = async () => {
+    if (!action || closing) return;
+    setClosing(true);
+    setActionError('');
+    try {
+      await onBranchTransition(branch.id, action, action === 'resolve' ? resolutionNote.trim() : undefined);
+      setAction(null);
+      setResolutionNote('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not close this branch.');
+    } finally {
+      setClosing(false);
+    }
+  };
+
   return (
     <aside
       className="w-[448px] shrink-0 h-full overflow-y-auto flex flex-col"
@@ -412,11 +537,108 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           }}
         >
           <span className="w-1.5 h-1.5 rounded-full bg-current" />
-          {branch.status === 'open' ? 'Open' : 'Concluded'}
+          {branch.status === 'open' ? 'Open' : workspace ? 'Resolved' : 'Concluded'}
         </span>
       </div>
 
       <div className="p-4 space-y-4">
+        {guidance && (
+          <section className="flex items-start gap-3 rounded-xl border border-border bg-s2 p-4" aria-labelledby="branch-guidance">
+            <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-amb" />
+            <div className="min-w-0 space-y-2">
+              <h3 id="branch-guidance" className="text-sm font-semibold text-t1">{guidance.title}</h3>
+              <p className="whitespace-pre-line text-[12.5px] leading-relaxed text-t2">{guidance.message}</p>
+            </div>
+          </section>
+        )}
+
+        {workspace && resolution && (
+          <div className="rounded-xl p-3.5" style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border)' }}>
+            <h3 className="text-[12px] font-semibold text-ok">Resolution on the main timeline</h3>
+            <p className="mt-1 break-words text-[12px] text-t1">{resolution}</p>
+          </div>
+        )}
+
+        {workspace && branch.status === 'open' && (
+          <section className="space-y-2 rounded-xl p-3.5" style={{ border: '1px solid var(--border)' }}>
+            {action ? (
+              <>
+                {action === 'resolve' ? (
+                  <label className="block space-y-1 text-[12px] font-semibold text-t1">
+                    Resolution note
+                    <textarea
+                      value={resolutionNote}
+                      onChange={(event) => setResolutionNote(event.target.value)}
+                      maxLength={450}
+                      rows={3}
+                      placeholder="What did you learn, or why are you closing this?"
+                      className="w-full rounded-lg border border-border bg-bg p-2 text-[12px] text-t1"
+                    />
+                  </label>
+                ) : (
+                  <p className="text-[12px] text-t2">Remove this branch from the live graph and keep it in History.</p>
+                )}
+                {actionError && <p role="alert" className="text-[12px] text-change">{actionError}</p>}
+                <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+                  <button type="button" onClick={confirmTransition}
+                    disabled={closing || (action === 'resolve' && !resolutionNote.trim())}
+                    className="rounded-lg bg-s2 px-3 py-1.5 text-branchOpen disabled:opacity-40">
+                    {closing ? 'Saving…' : action === 'resolve' ? 'Save to main timeline' : 'Confirm dissolve'}
+                  </button>
+                  <button type="button" onClick={() => setAction(null)} disabled={closing}
+                    className="rounded-lg px-3 py-1.5 text-t2">Cancel</button>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+                <button type="button" onClick={() => setAction('resolve')}
+                  className="rounded-lg bg-s2 px-3 py-1.5 text-branchOpen">Resolve branch</button>
+                <button type="button" onClick={() => setAction('dissolve')}
+                  className="rounded-lg bg-s2 px-3 py-1.5 text-t2">Dissolve branch</button>
+              </div>
+            )}
+          </section>
+        )}
+
+        {workspace && !guidance && draftContext && (draftContext.can_generate || draftContext.sent_to_ai) && (
+          <section className="space-y-2 rounded-xl border border-border p-3.5">
+            <h3 className="text-[12px] font-semibold text-t1">Gemini drafts</h3>
+            <p className="text-[11.5px] leading-relaxed text-t2">
+              Suggested factors and possible test results use synthetic demo evidence.
+            </p>
+            {draftContext.can_generate && branch.status === 'open' && (
+              <button type="button" onClick={generateDrafts} disabled={draftRequestId === branch.id}
+                className="rounded-lg bg-s2 px-3 py-1.5 text-[11px] font-semibold text-branchOpen disabled:opacity-40">
+                {draftRequestId === branch.id ? 'Generating drafts…' :
+                  draftContext.sent_to_ai ? 'Regenerate Gemini drafts' : 'Generate Gemini drafts'}
+              </button>
+            )}
+            {draftContext.sent_to_ai && (
+              <details className="rounded-lg border border-border px-3 py-2 text-[11px] text-t2">
+                <summary className="cursor-pointer font-semibold">View Gemini draft request</summary>
+                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {draftContext.sent_to_ai}
+                </pre>
+              </details>
+            )}
+          </section>
+        )}
+        {draftError?.id === branch.id && <p role="alert" className="text-[12px] text-change">{draftError.message}</p>}
+        {workspace && !!draftContext?.related_resolutions.length && (
+          <section className="space-y-2 rounded-xl border border-border p-3.5">
+            <h3 className="text-[12px] font-semibold text-t1">Related local resolutions</h3>
+            {draftContext.related_resolutions.map(({ id, title, date, note }) => (
+              <div key={id} className="text-[11.5px] leading-relaxed text-t2">
+                <p className="font-semibold text-t1">{title} · {date}</p>
+                <p className="break-words">{note}</p>
+              </div>
+            ))}
+          </section>
+        )}
+        {workspace && !guidance && !branch.hypotheses.length && !draftContext?.can_generate && (
+          <p className="text-[12px] text-t2">This branch has no suggested factors. Try a tracked demo outcome, such as headache days or short sleep.</p>
+        )}
+
         {/* Triggering Change Event Banner */}
         {branch.change_event && (
           <div
@@ -436,8 +658,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           </div>
         )}
 
-        {/* Competing Hypotheses */}
-        <div className="space-y-2.5">
+        {!guidance && <div className="space-y-2.5">
           <div className="flex items-center justify-between">
             <span className="font-mono text-[9.5px] uppercase tracking-wider text-t3">
               {branch.hypotheses.length} Competing Hypotheses
@@ -446,6 +667,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
               <button
                 type="button"
                 onClick={handleSpeakBranch}
+                disabled={loadingAudio}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-mono text-[9.5px] font-semibold transition-colors"
                 style={{
                   backgroundColor: speakingSummary ? 'var(--trunk)' : 'var(--s2)',
@@ -454,7 +676,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
                 }}
               >
                 <Volume2 className="w-3 h-3" />
-                <span>{speakingSummary ? 'Speaking…' : 'Listen (11Labs)'}</span>
+                <span>{loadingAudio ? 'Generating audio…' : speakingSummary ? 'Pause narration' : 'Listen with ElevenLabs'}</span>
               </button>
               <button
                 type="button"
@@ -467,15 +689,28 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
             </div>
           </div>
 
+          <audio
+            ref={branchAudio}
+            controls
+            aria-label="ElevenLabs narration"
+            className={audioReady ? 'w-full' : 'hidden'}
+            onPlaying={() => setSpeakingSummary(true)}
+            onPause={() => setSpeakingSummary(false)}
+            onEnded={() => setSpeakingSummary(false)}
+          />
+          {audioMessage && <p role="status" className="text-[12px] text-t2">{audioMessage}</p>}
+
           {branch.hypotheses.map((hyp) => (
             <HypothesisCard
               key={hyp.rank}
               hyp={hyp}
               defaultExpanded={hyp.rank === 1}
+              workspace={workspace}
+              testLabel={workspace ? 'Next step' : 'Test'}
               onOpenRecord={(rid) => onOpenRecord(rid, 'raw')}
             />
           ))}
-        </div>
+        </div>}
 
         {/* Experiment Card */}
         {exp && (
@@ -535,8 +770,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           </div>
         )}
 
-        {/* Evidence List */}
-        <div className="space-y-2 pb-4">
+        {!guidance && <div className="space-y-2 pb-4">
           <div className="font-mono text-[9.5px] uppercase tracking-wider text-t3">
             {branch.evidence.length} Evidence Records
           </div>
@@ -572,7 +806,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
               </button>
             );
           })}
-        </div>
+        </div>}
       </div>
     </aside>
   );

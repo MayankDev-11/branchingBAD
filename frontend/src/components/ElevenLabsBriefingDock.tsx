@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { KeyRound, Pause, Play, ShieldCheck, SkipForward, Volume2, X } from 'lucide-react';
+import { Pause, Play, ShieldCheck, SkipForward, Volume2, X } from 'lucide-react';
 import { synthesizeWithElevenLabs } from '../api';
 
 export interface BriefingBeat {
@@ -26,8 +26,6 @@ export const ElevenLabsBriefingDock: React.FC<ElevenLabsBriefingDockProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [beatIdx, setBeatIdx] = useState(0);
   const [engineLabel, setEngineLabel] = useState<'ElevenLabs TTS' | 'Local Voice Fallback'>('ElevenLabs TTS');
-  const [showKey, setShowKey] = useState(false);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('elevenlabs_api_key') ?? '');
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playingRef = useRef(false);
@@ -63,7 +61,7 @@ export const ElevenLabsBriefingDock: React.FC<ElevenLabsBriefingDockProps> = ({
 
     // 1. Try real ElevenLabs TTS (cached in memory so replays spend 0 credits!)
     try {
-      const audioUrl = await synthesizeWithElevenLabs(beat.text, apiKey);
+      const audioUrl = await synthesizeWithElevenLabs(beat.text);
       if (!playingRef.current) return;
       setEngineLabel('ElevenLabs TTS');
       const audio = new Audio(audioUrl);
@@ -191,15 +189,6 @@ export const ElevenLabsBriefingDock: React.FC<ElevenLabsBriefingDockProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => setShowKey((v) => !v)}
-            title="Set ElevenLabs API Key"
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-t2 hover:text-t1"
-            style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border)' }}
-          >
-            <KeyRound className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
             onClick={() => {
               stopPlayback();
               setExpanded(false);
@@ -211,20 +200,6 @@ export const ElevenLabsBriefingDock: React.FC<ElevenLabsBriefingDockProps> = ({
           </button>
         </div>
       </div>
-
-      {showKey && (
-        <input
-          type="password"
-          value={apiKey}
-          onChange={(e) => {
-            setApiKey(e.target.value);
-            localStorage.setItem('elevenlabs_api_key', e.target.value);
-          }}
-          placeholder="Paste ElevenLabs xi-api-key for live neural voice (cached in browser)"
-          className="w-full px-3 py-1.5 rounded-lg font-mono text-[10.5px] text-t1 bg-bg border focus:outline-none"
-          style={{ borderColor: 'var(--border)' }}
-        />
-      )}
 
       {/* Synchronized Spoken Caption */}
       <p className="text-[12px] text-t1 leading-relaxed">{activeBeat.text}</p>
