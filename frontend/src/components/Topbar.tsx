@@ -40,7 +40,8 @@ export const Topbar: React.FC<TopbarProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const q = question.trim() || 'Why do I keep getting headaches?';
+    const q = question.trim();
+    if (!q || isAsking) return;
     onAskSubmit(q);
   };
 

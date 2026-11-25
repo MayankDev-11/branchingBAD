@@ -65,10 +65,11 @@ const ConfidenceRing: React.FC<{ value: number; rank: number }> = ({ value, rank
 const HypothesisCard: React.FC<{
   hyp: BranchHypothesis;
   defaultExpanded: boolean;
+  testLabel?: string;
   onOpenRecord: (id: string) => void;
-}> = ({ hyp, defaultExpanded, onOpenRecord }) => {
+}> = ({ hyp, defaultExpanded, testLabel = 'Test', onOpenRecord }) => {
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const pct = hyp.confidence ?? (hyp.rank === 1 ? 72 : hyp.rank === 2 ? 41 : 28);
+  const pct = hyp.confidence;
   const borderColor =
     hyp.rank === 1
       ? 'rgba(16, 185, 129, 0.35)'
@@ -77,7 +78,9 @@ const HypothesisCard: React.FC<{
       : 'rgba(255, 77, 109, 0.28)';
 
   const badge =
-    pct >= 60
+    pct === undefined
+      ? null
+      : pct >= 60
       ? { label: 'Top finding', color: 'var(--ok)', bg: 'rgba(16,185,129,0.12)', icon: <Check className="w-3 h-3" /> }
       : pct >= 40
       ? { label: 'Moderate', color: 'var(--amb)', bg: 'rgba(245,158,11,0.12)', icon: <HelpCircle className="w-3 h-3" /> }
@@ -111,22 +114,22 @@ const HypothesisCard: React.FC<{
               <h4 className="text-[13.5px] font-semibold text-t1">
                 {hyp.label ?? hyp.text}
               </h4>
-              <span
+              {badge && <span
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
                 style={{ backgroundColor: badge.bg, color: badge.color }}
               >
                 {badge.icon}
                 {badge.label}
-              </span>
+              </span>}
             </div>
-            <p className="mt-1 text-[11.5px] text-t2 leading-relaxed">
+            {!expanded && <p className="mt-1 text-[11.5px] text-t2 leading-relaxed">
               {hyp.claims[0]?.text ?? `No direct claims yet · Proposed: ${hyp.test}`}
-            </p>
+            </p>}
           </div>
         </div>
 
         <div className="flex items-center gap-1">
-          <ConfidenceRing value={pct} rank={hyp.rank} />
+          {pct !== undefined && <ConfidenceRing value={pct} rank={hyp.rank} />}
           {expanded ? (
             <ChevronUp className="w-4 h-4 text-t3" />
           ) : (
@@ -165,12 +168,12 @@ const HypothesisCard: React.FC<{
               No verified record links yet. Log 7+ days to evaluate.
             </p>
           )}
-          <div
+          {hyp.test && <div
             className="rounded-lg px-2.5 py-1.5 font-mono text-[10.5px] text-t2"
             style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
           >
-            Test: {hyp.test}
-          </div>
+            {testLabel}: {hyp.test}
+          </div>}
         </div>
       )}
     </div>
@@ -244,6 +247,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   // 2. ASK RESPONSE VIEW
   if (askResult && askQuestion) {
     const { provider } = readAskAudit(askResult.sent_to_ai);
+    const hasEvidence = askResult.hypotheses.length > 0;
     return (
       <aside
         className="w-[448px] shrink-0 h-full overflow-y-auto flex flex-col"
@@ -268,7 +272,11 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 font-mono text-[9.5px] text-branchOpen">
                 <Sparkles className="w-3 h-3" />
-                <span className="uppercase">{provider ? `${provider} · ` : ''}Citation-checked</span>
+                <span className="uppercase">
+                  {provider ? `${provider} · Citation-checked` :
+                    askResult.sent_to_ai ? 'Citation-checked' :
+                    hasEvidence ? 'Python · Demo evidence' : 'Ask RootTrace'}
+                </span>
               </div>
               <h2 className="font-serif italic text-[17px] text-t1 truncate">{askQuestion}</h2>
             </div>
@@ -276,7 +284,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
 
           <button
             type="button"
-            disabled={!askResult.hypotheses[0]?.claims[0]?.record_ids[0]}
+            disabled={!askResult.sent_to_ai || !askResult.hypotheses[0]?.claims[0]?.record_ids[0]}
             onClick={() => {
               const rid = askResult.hypotheses[0]?.claims[0]?.record_ids[0];
               if (rid) onOpenRecord(rid, 'ai');
@@ -306,23 +314,33 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
             </div>
           )}
 
-          <div className="font-mono text-[9.5px] uppercase tracking-wider text-t3">
-            Ranked Explanations (Click Any Record ID)
-          </div>
+          {hasEvidence ? (
+            <div className="font-mono text-[9.5px] uppercase tracking-wider text-t3">Answer from demo evidence</div>
+          ) : (
+            <div className="rounded-xl border border-border p-4">
+              <h3 className="text-sm font-semibold text-t1">No matching demo evidence</h3>
+              <p className="mt-2 text-[12px] leading-relaxed text-t2">
+                Try asking “How much did I sleep last week?”, “What does water intake have to do with headaches?”,
+                or “What should I do next?” on a demo investigation.
+              </p>
+            </div>
+          )}
 
           {askResult.hypotheses.map((h) => (
             <HypothesisCard
               key={h.rank}
               hyp={h}
               defaultExpanded={true}
+              testLabel="Next step"
               onOpenRecord={(rid) => onOpenRecord(rid, 'raw')}
             />
           ))}
 
-          <p className="pt-2 font-mono text-[10px] text-t3 leading-relaxed">
-            Personal pattern, not medical advice. Every number above was verified by Python against
-            immutable record IDs before display.
-          </p>
+          {hasEvidence && (
+            <p className="pt-2 font-mono text-[10px] text-t3 leading-relaxed">
+              These findings use synthetic demo records. Open a record ID to inspect the source.
+            </p>
+          )}
         </div>
       </aside>
     );

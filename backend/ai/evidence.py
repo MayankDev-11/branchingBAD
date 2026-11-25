@@ -4,11 +4,13 @@ from contextlib import closing
 from functools import lru_cache
 
 from backend.analysis.baselines import get_baseline
-from backend.analysis.patterns import compare_periods, summarize_metric
-from backend.analysis.series import days
+from backend.ai.demo_questions import DemoQuestion
+from backend.analysis.patterns import compare_periods, fmt, summarize_metric
+from backend.analysis.series import days, load_series
 from backend.analysis.state import refresh_state
 from backend.data import generate_demo
 from backend.data.db import connect, loads
+from backend.data.metrics import METRICS
 from backend.data.queries import build_branch
 from backend.data.store import store
 
@@ -34,7 +36,7 @@ class UnknownBranch(ValueError):
     pass
 
 
-def _branch_hypotheses(conn, branch_id, clock):
+def _branch_hypotheses(conn, branch_id, clock, metric=None):
     branch = build_branch(conn, branch_id, clock) if branch_id else None
     if branch_id and branch is None:
         raise UnknownBranch(branch_id)
@@ -49,7 +51,8 @@ def _branch_hypotheses(conn, branch_id, clock):
             "rank": item["rank"], "text": item["label"], "claims": item["claims"],
             "test": SAFE_TESTS.get(metrics.get(item["label"]), DEFAULT_TEST),
         }
-        for item in branch["hypotheses"] if item["claims"]
+        for item in branch["hypotheses"]
+        if item["claims"] and (metric is None or metrics.get(item["label"]) == metric)
     ]
 
 
@@ -67,14 +70,80 @@ def _valid_record_ids(conn, clock, hypotheses):
 
 
 @lru_cache(maxsize=8)
-def synthetic_hypotheses(branch_id, clock):
+def synthetic_hypotheses(question: DemoQuestion, clock):
     """Create Gemini evidence from the generator alone, independent of workspace data."""
     with closing(connect(":memory:")) as conn:
         generate_demo.build(conn)
         if clock != generate_demo.CLOCK_START:
             refresh_state(conn, clock)
-        _, hypotheses = _branch_hypotheses(conn, branch_id, clock)
+        if question.kind == "reading":
+            hypotheses = _demo_reading(conn, question, clock)
+        elif question.kind == "change":
+            hypotheses = _demo_change(conn, question, clock)
+        else:
+            branch, hypotheses = _branch_hypotheses(conn, question.branch_id, clock, question.metric)
+            if question.kind == "next":
+                hypotheses = _demo_next_step(branch, hypotheses)
         return hypotheses, _valid_record_ids(conn, clock, hypotheses)
+
+
+def _demo_reading(conn, question, clock):
+    metric = METRICS[question.metric]
+    end = question.on_date or clock - days(question.offset)
+    values, ids = load_series(conn, metric.key, end - days(question.window - 1), end)
+    if values.empty:
+        return []
+    date_range = f"{values.index[0].date()} to {values.index[-1].date()}"
+    if len(values) == 1:
+        text = f"{metric.label(float(values.iloc[0]))} on {values.index[0].date()} in the demo."
+    elif metric.binary:
+        text = f"{metric.title} was recorded on {int(values.sum())} of {len(values)} demo days ({date_range})."
+    elif question.total:
+        text = f"{metric.title} totalled {fmt(metric.key, values.sum())} across {len(values)} demo readings ({date_range})."
+    else:
+        text = f"{metric.title} averaged {fmt(metric.key, values.mean())} across {len(values)} demo readings ({date_range})."
+    return [{"rank": 1, "text": f"{metric.title} readings", "test": "",
+             "claims": [{"text": text, "record_ids": ids.tolist()}]}]
+
+
+def _demo_change(conn, question, clock):
+    on_date = question.on_date.isoformat() if question.on_date else None
+    row = conn.execute(
+        "SELECT date, label, record_ids FROM change_events "
+        "WHERE metric = ? AND detected_on <= ? AND (? IS NULL OR date = ?) "
+        "ORDER BY date DESC LIMIT 1",
+        (question.metric, clock.isoformat(), on_date, on_date),
+    ).fetchone()
+    if row is None:
+        return []
+    return [{
+        "rank": 1, "text": "Detected sleep shift",
+        "test": "Open the change event and compare the readings around the shift. The demo does not establish a cause.",
+        "claims": [{"text": f"{row['label']} starting {row['date']} in the demo.",
+                    "record_ids": loads(row["record_ids"], [])}],
+    }]
+
+
+def _demo_next_step(branch, hypotheses):
+    if not hypotheses:
+        return []
+    experiment = branch["experiment"]
+    if not experiment:
+        return [{**hypotheses[0], "claims": hypotheses[0]["claims"][:1]}]
+    related = next((item for item in hypotheses if item["rank"] == experiment["hypothesis_rank"]), hypotheses[0])
+    if experiment["status"] == "active":
+        title = "Continue the locked experiment"
+        step = (
+            "Open the experiment card and follow its existing schedule. Each morning, log your bedtime, "
+            "sleep duration and whether you had a headache. Keep the locked success criterion fixed."
+        )
+    elif experiment["status"] == "draft":
+        title = "Review the experiment before starting"
+        step = "Review the experiment plan and lock the success criterion before collecting trial data."
+    else:
+        title = "Review the completed experiment"
+        step = "Check the result and its linked records in the investigation before planning another test."
+    return [{"rank": 1, "text": title, "claims": related["claims"][:1], "test": step}]
 
 
 def collect_evidence(branch_id: str | None, question: str) -> tuple[dict, set[str]]:

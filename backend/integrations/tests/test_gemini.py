@@ -36,7 +36,8 @@ def test_gemini_only_gets_a_fixed_topic_and_synthetic_evidence(gemini_demo):
     for private in ("Test Person", "9876543210", "private@example.test", "mock-key", "source_file", "device"):
         assert private not in audit
     sent = json.loads(json.loads(audit)["contents"][0]["parts"][0]["text"])
-    assert sent["topic"] == "Headache patterns in the fictional demo"
+    assert sent["topic"] == "Sleep and headaches in the fictional demo"
+    assert [item["text"] for item in sent["hypotheses"]] == ["Short sleep"]
     assert [item.rank for item in answer.hypotheses] == [1]
     assert answer.hypotheses[0].claims
     assert answer.hypotheses[0].claims[0].record_ids == sent["hypotheses"][0]["claims"][0]["record_ids"]
@@ -59,3 +60,41 @@ def test_gemini_quota_error_does_not_include_provider_details(gemini_demo):
     with pytest.raises(gemini.GeminiUnavailable, match="quota is exhausted") as exc:
         ask("Headache patterns?", "br_1")
     assert "mock-key" not in str(exc.value)
+
+
+def test_water_question_sends_only_water_evidence(gemini_demo):
+    post = Mock(return_value=httpx.Response(200, json={
+        "candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": '{"ranks":[2]}'}]}}],
+    }, request=httpx.Request("POST", gemini.ENDPOINT)))
+    gemini_demo.setattr(gemini.httpx, "post", post)
+    result = ask("What does water intake have to do with headaches?", "br_1")
+    assert [item.text for item in result.hypotheses] == ["Low water intake"]
+    sent = json.loads(json.loads(result.sent_to_ai)["contents"][0]["parts"][0]["text"])
+    assert [item["rank"] for item in sent["hypotheses"]] == [2]
+
+
+def test_demo_uses_local_answers_for_next_step_readings_and_unsupported_questions(gemini_demo, fresh_store):
+    post = Mock(side_effect=AssertionError("These questions stay local"))
+    gemini_demo.setattr(gemini.httpx, "post", post)
+
+    next_step = ask("What should I do next?", None)
+    assert next_step.hypotheses[0].text == "Continue the locked experiment"
+    assert "locked success criterion" in next_step.hypotheses[0].test
+    fresh_store.advance(10)
+    assert ask("What should I do next?", "br_1").hypotheses[0].text == "Review the completed experiment"
+
+    sleep = ask("How much did I sleep last week?", "br_1")
+    assert sleep.hypotheses[0].claims[0].text.startswith("Sleep averaged ")
+    assert len(sleep.hypotheses[0].claims[0].record_ids) == 7
+    day = ask("How much did I sleep on Nov 3?", None)
+    assert day.hypotheses[0].claims[0].record_ids == ["sl_0071"]
+    assert "2026-11-03" in day.hypotheses[0].claims[0].text
+    shift = ask("Why did sleep drop on Nov 3?", None)
+    assert "47 min" in shift.hypotheses[0].claims[0].text
+    assert shift.hypotheses[0].claims[0].record_ids
+
+    assert not ask("What did I eat for lunch?", "br_1").hypotheses
+    assert not ask("What medicine should I take for a headache?", "br_1").hypotheses
+    assert not next_step.sent_to_ai
+    assert not sleep.sent_to_ai
+    post.assert_not_called()

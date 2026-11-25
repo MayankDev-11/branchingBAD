@@ -194,6 +194,8 @@ export const RecordModal: React.FC<RecordModalProps> = ({
               <p className="text-[12px] leading-relaxed text-t2">
                 {askContext?.red_flag
                   ? 'RootTrace stopped at the local safety check.'
+                  : askContext?.hypotheses.length
+                  ? 'RootTrace computed this answer locally from demo records.'
                   : 'Nothing has been sent to the AI yet. Submit an Ask question to inspect the request here.'}
               </p>
             ) : null}

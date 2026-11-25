@@ -11,6 +11,8 @@ GEMINI_API_KEY=
 
 The value after `GEMINI_API_KEY=` is your key. The Gemini path uses the standard Python requirements and needs no AWS settings or spaCy model. It sends a fixed demo topic and evidence rebuilt from the synthetic generator in memory. The typed question, account details, workspace branches and imported data stay local. The backend handles red flags first, enables Gemini content filters, and verifies selections before returning citations. Google may use free-tier requests to improve its products. [Model pricing](https://aistudio.google.com/docs/models/gemini-3.5-flash-lite#pricing) · [Gemini terms](https://aistudio.google.com/docs/terms)
 
+Try asking about water and headaches, sleep over the last week, the sleep shift on Nov 3, or the next step for the selected investigation. Python answers readings, detected changes, and experiment next steps directly. Gemini sees only hypotheses related to a recognized evidence question. Unsupported questions show that the demo has no matching evidence.
+
 ## Bedrock and weekly audio
 
 To use Bedrock, set `ROOTTRACE_AI_PROVIDER=bedrock` and install its additional dependencies.

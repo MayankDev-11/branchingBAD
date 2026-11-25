@@ -8,8 +8,9 @@ from decimal import Decimal
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.ai.evidence import TOOLS, collect_evidence, synthetic_hypotheses
-from backend.ai.gemini import demo_topic, select_ranks
+from backend.ai.demo_questions import interpret_demo_question
+from backend.ai.evidence import TOOLS, UnknownBranch, collect_evidence, synthetic_hypotheses
+from backend.ai.gemini import select_ranks
 from backend.data.store import store
 from backend.privacy.questions import is_red_flag, scrub_question
 
@@ -110,19 +111,7 @@ def ask(question: str, branch_id: str | None, full_name: str = "", email: str = 
     load_dotenv()
     provider = os.environ.get("ROOTTRACE_AI_PROVIDER", "bedrock").strip().lower()
     if provider == "gemini":
-        topic, default_branch = demo_topic(question)
-        candidates, valid_ids = synthetic_hypotheses(branch_id or default_branch, store.clock)
-        if not candidates:
-            return Answer(red_flag=False, hypotheses=[], dropped_claims=0, sent_to_ai="")
-        ranks, audit = select_ranks(topic, candidates)
-        selected = set(ranks)
-        proposed = Answer(
-            red_flag=False,
-            hypotheses=[Hypothesis.model_validate(item) for item in candidates if item["rank"] in selected],
-            dropped_claims=0,
-            sent_to_ai="",
-        )
-        return validate_answer(proposed, candidates, valid_ids, audit)
+        return _ask_demo(question, branch_id)
     if provider != "bedrock":
         raise ModelUnavailable("Set ROOTTRACE_AI_PROVIDER to gemini or bedrock.")
 
@@ -185,3 +174,28 @@ def ask(question: str, branch_id: str | None, full_name: str = "", email: str = 
             answer = Answer.model_validate(use.get("input"))
             return validate_answer(answer, evidence["branch_patterns"], valid_ids, "\n".join(audit))
     raise ModelUnavailable("Bedrock did not submit an answer.")
+
+
+def _ask_demo(question: str, branch_id: str | None) -> Answer:
+    if branch_id is not None and branch_id not in {"br_0", "br_1"}:
+        raise UnknownBranch(branch_id)
+    clock = store.clock
+    intent = interpret_demo_question(question, branch_id, clock)
+    empty = Answer(red_flag=False, hypotheses=[], dropped_claims=0, sent_to_ai="")
+    if intent is None:
+        return empty
+    candidates, valid_ids = synthetic_hypotheses(intent, clock)
+    if not candidates:
+        return empty
+    if intent.kind == "patterns":
+        ranks, audit = select_ranks(intent.topic, candidates)
+        selected = set(ranks)
+        candidates_to_show = [item for item in candidates if item["rank"] in selected]
+    else:
+        audit = ""
+        candidates_to_show = candidates
+    proposed = Answer(
+        red_flag=False, hypotheses=[Hypothesis.model_validate(item) for item in candidates_to_show],
+        dropped_claims=0, sent_to_ai="",
+    )
+    return validate_answer(proposed, candidates, valid_ids, audit)

@@ -2,12 +2,9 @@
 
 import json
 import os
-import re
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
-
-from backend.privacy.questions import normalized
 
 MODEL_ID = "gemini-3.5-flash-lite"
 ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent"
@@ -16,13 +13,7 @@ SYSTEM = (
     "Use only the supplied hypothesis ranks. Observed associations do not establish causation. "
     "Return an empty list if no supplied hypothesis is relevant to the topic."
 )
-TOPICS = (
-    (r"\b(?:water|hydrat\w*|thirst\w*)\b", "Hydration patterns in the fictional demo"),
-    (r"\b(?:screens?|screen time|phone use)\b", "Late screen use in the fictional demo"),
-    (r"\b(?:coffee|caffeine)\b", "Caffeine and sleep in the fictional demo"),
-    (r"\b(?:headaches?|migraines?)\b", "Headache patterns in the fictional demo"),
-    (r"\b(?:sleep\w*|bedtime|rest)\b", "Sleep patterns in the fictional demo"),
-)
+
 
 
 class GeminiUnavailable(RuntimeError):
@@ -32,15 +23,6 @@ class GeminiUnavailable(RuntimeError):
 class Selection(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     ranks: list[int] = Field(max_length=3)
-
-
-def demo_topic(question: str) -> tuple[str, str]:
-    text = normalized(question).casefold()
-    branch_id = "br_0" if re.search(r"\b(?:coffee|caffeine)\b", text) and "headache" not in text else "br_1"
-    for pattern, topic in TOPICS:
-        if re.search(pattern, text):
-            return topic, branch_id
-    return "Overview of the selected fictional investigation", branch_id
 
 
 def select_ranks(topic: str, hypotheses: list[dict]) -> tuple[list[int], str]:

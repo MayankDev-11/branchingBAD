@@ -142,6 +142,8 @@ export const App: React.FC = () => {
       prev === 'dashboard' || prev === 'investigations' ? prev : 'dashboard'
     );
     setIsAsking(true);
+    setAskResult(null);
+    setErrorMsg(null);
     setAskQuestion(question);
     try {
       const res = await api.ask(selectedBranchId, question);
