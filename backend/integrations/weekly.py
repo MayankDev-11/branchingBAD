@@ -58,6 +58,28 @@ def audio_path(audio_id: str) -> Path | None:
     return path if path.is_file() and path.stat().st_size else None
 
 
+def _provider_error_token(response: httpx.Response) -> str:
+    """Extract only safe machine error/field codes from ElevenLabs JSON (never raw messages or secrets)."""
+    try:
+        detail = response.json().get("detail")
+    except (ValueError, AttributeError):
+        return ""
+    if isinstance(detail, dict):
+        status = detail.get("status")
+        if isinstance(status, str) and re.fullmatch(r"[a-z0-9_]{1,48}", status):
+            return status
+    if isinstance(detail, list):
+        fields = [
+            ".".join(str(part) for part in item.get("loc", []) if re.fullmatch(r"[A-Za-z0-9_-]{1,32}", str(part)))
+            for item in detail
+            if isinstance(item, dict)
+        ]
+        cleaned = [f for f in fields if f]
+        if cleaned:
+            return ", ".join(cleaned[:3])
+    return ""
+
+
 def render_audio(voice: str, key: str, payload: dict) -> bytes:
     try:
         response = httpx.post(
@@ -67,12 +89,20 @@ def render_audio(voice: str, key: str, payload: dict) -> bytes:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
+        token = _provider_error_token(exc.response)
+        suffix = f" ({token})" if token else ""
         if status == 402:
-            raise AudioUnavailable("ElevenLabs requires payment for this voice or the account is out of credits.", 402) from None
+            raise AudioUnavailable(
+                f"ElevenLabs requires payment for this voice or the account is out of credits{suffix}.", 402
+            ) from None
         if status in (401, 403):
             raise AudioUnavailable("ElevenLabs rejected the API key or its Text to Speech permission.", 503) from None
         if status == 404:
             raise AudioUnavailable("ElevenLabs could not find the configured voice.", 503) from None
+        if status == 422:
+            raise AudioUnavailable(
+                f"ElevenLabs rejected the synthesis request (422{f': {token}' if token else ''}).", 422
+            ) from None
         if status == 429:
             raise AudioUnavailable("ElevenLabs is rate-limiting narration. Try again shortly.", 429) from None
         raise AudioUnavailable("ElevenLabs could not generate narration.") from None
@@ -90,7 +120,8 @@ def weekly_report() -> dict:
     key = os.environ.get("ELEVENLABS_API_KEY")
     if not VOICE_ID.fullmatch(voice):
         raise AudioUnavailable("Configure ELEVENLABS_VOICE_ID.", 503)
-    payload = {"model_id": "eleven_multilingual_v2", "text": "\n".join(line["text"] for line in lines)}
+    tts_model = os.environ.get("ELEVENLABS_TTS_MODEL", "").strip() or "eleven_v4_turbo"
+    payload = {"model_id": tts_model, "text": "\n".join(line["text"] for line in lines)}
     digest = hashlib.sha256(json.dumps([voice, payload], sort_keys=True).encode()).hexdigest()
 
     with CACHE_LOCK:
