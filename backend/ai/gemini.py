@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from typing import Literal
 
 import httpx
@@ -81,12 +82,7 @@ def _request(topic, hypotheses, system, schema):
     }
     audit = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     try:
-        response = httpx.post(
-            ENDPOINT, content=audit.encode("utf-8"),
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            timeout=httpx.Timeout(20, connect=5), follow_redirects=False,
-        )
-        response.raise_for_status()
+        response = _post_with_retries(audit, api_key)
         candidates = response.json()["candidates"]
         candidate = candidates[0]
         if candidate.get("finishReason") != "STOP":
@@ -101,7 +97,44 @@ def _request(topic, hypotheses, system, schema):
             raise GeminiUnavailable("Gemini quota is exhausted. Try again later.") from None
         if exc.response.status_code in (400, 401, 403):
             raise GeminiUnavailable("Check the Gemini API key and project access.") from None
-        raise GeminiUnavailable("Gemini is temporarily unavailable.") from None
-    except (httpx.RequestError, ValueError, KeyError, IndexError, TypeError):
+        raise GeminiUnavailable(
+            f"Gemini is busy right now (tried {MAX_ATTEMPTS} times). Press Retry to ask again."
+        ) from None
+    except httpx.RequestError:
+        raise GeminiUnavailable(
+            f"Could not reach Gemini (tried {MAX_ATTEMPTS} times). Check the internet and press Retry."
+        ) from None
+    except (ValueError, KeyError, IndexError, TypeError):
         raise GeminiUnavailable("Gemini returned no usable demo answer.") from None
     return selection, audit
+
+
+# Google's free tier sometimes answers 503 "high demand" (about 1 call in 15 in testing on
+# 26 Nov) or times out. Those are worth retrying quietly; key, quota and bad-request errors
+# are not, because asking again gives the same answer.
+MAX_ATTEMPTS = 3
+RETRY_DELAYS = (1.0, 2.0)  # seconds to wait before the 2nd and 3rd attempts
+RETRYABLE_STATUS = {500, 502, 503, 504}
+_sleep = time.sleep  # replaced in tests so they don't wait
+
+
+def _post_with_retries(body: str, api_key: str) -> httpx.Response:
+    """POST to Gemini, retrying temporary failures up to MAX_ATTEMPTS in total.
+    Raises the last HTTPStatusError / RequestError when every attempt fails."""
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            response = httpx.post(
+                ENDPOINT, content=body.encode("utf-8"),
+                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                timeout=httpx.Timeout(20, connect=5), follow_redirects=False,
+            )
+            response.raise_for_status()
+            return response
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in RETRYABLE_STATUS or attempt == MAX_ATTEMPTS - 1:
+                raise
+        except (httpx.TimeoutException, httpx.NetworkError):
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+        _sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
+    raise AssertionError("unreachable")

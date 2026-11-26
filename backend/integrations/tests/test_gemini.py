@@ -98,3 +98,51 @@ def test_demo_uses_local_answers_for_next_step_readings_and_unsupported_question
     assert not next_step.sent_to_ai
     assert not sleep.sent_to_ai
     post.assert_not_called()
+
+
+# --- Automatic retries for temporary Gemini failures (added 26 Nov) -------------------------
+
+def _gemini_reply(status, ranks="[1]"):
+    body = {"error": {"message": "busy"}} if status != 200 else {
+        "candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": f'{{"ranks":{ranks}}}'}]}}],
+    }
+    return httpx.Response(status, json=body, request=httpx.Request("POST", gemini.ENDPOINT))
+
+
+@pytest.fixture
+def no_wait(gemini_demo):
+    waits = []
+    gemini_demo.setattr(gemini, "_sleep", waits.append)
+    return waits
+
+
+def test_busy_gemini_is_retried_quietly_and_then_answers(gemini_demo, no_wait):
+    post = Mock(side_effect=[_gemini_reply(503), _gemini_reply(503), _gemini_reply(200)])
+    gemini_demo.setattr(gemini.httpx, "post", post)
+    answer = ask("Why do I keep getting headaches?", "br_1")
+    assert post.call_count == 3
+    assert no_wait == [1.0, 2.0]
+    assert answer.hypotheses  # the user never saw the two failures
+
+
+def test_gemini_says_busy_with_retry_hint_after_three_failed_attempts(gemini_demo, no_wait):
+    post = Mock(return_value=_gemini_reply(503))
+    gemini_demo.setattr(gemini.httpx, "post", post)
+    with pytest.raises(gemini.GeminiUnavailable, match=r"busy right now \(tried 3 times\)\. Press Retry"):
+        ask("Why do I keep getting headaches?", "br_1")
+    assert post.call_count == gemini.MAX_ATTEMPTS == 3
+
+
+def test_timeouts_are_retried_but_key_and_quota_errors_are_not(gemini_demo, no_wait):
+    request = httpx.Request("POST", gemini.ENDPOINT)
+    post = Mock(side_effect=[httpx.ReadTimeout("slow", request=request), _gemini_reply(200)])
+    gemini_demo.setattr(gemini.httpx, "post", post)
+    assert ask("Why do I keep getting headaches?", "br_1").hypotheses
+    assert post.call_count == 2
+
+    for status, message in ((429, "quota is exhausted"), (403, "Check the Gemini API key")):
+        post = Mock(return_value=_gemini_reply(status))
+        gemini_demo.setattr(gemini.httpx, "post", post)
+        with pytest.raises(gemini.GeminiUnavailable, match=message):
+            ask("Why do I keep getting headaches?", "br_1")
+        assert post.call_count == 1  # asking again would give the same error, so no retry
