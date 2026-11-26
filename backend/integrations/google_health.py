@@ -40,10 +40,12 @@ from backend.data.db import connect, dumps, init_schema, loads
 from backend.data.import_apple_health import IST, PLAUSIBLE, _next_numbers, clean_source_name
 from backend.data.metrics import METRICS
 
-AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-TOKEN_URL = "https://oauth2.googleapis.com/token"
-REVOKE_URL = "https://oauth2.googleapis.com/revoke"
-API = "https://health.googleapis.com/v4/users/me"
+# Google's real endpoints. The GOOGLE_HEALTH_*_URL overrides exist only for local testing against a
+# stand-in server (e.g. a recorded walkthrough without a real Google account); leave them unset.
+AUTH_URL = os.environ.get("GOOGLE_HEALTH_AUTH_URL") or "https://accounts.google.com/o/oauth2/v2/auth"
+TOKEN_URL = os.environ.get("GOOGLE_HEALTH_TOKEN_URL") or "https://oauth2.googleapis.com/token"
+REVOKE_URL = os.environ.get("GOOGLE_HEALTH_REVOKE_URL") or "https://oauth2.googleapis.com/revoke"
+API = os.environ.get("GOOGLE_HEALTH_API_URL") or "https://health.googleapis.com/v4/users/me"
 SCOPE_SLEEP = "https://www.googleapis.com/auth/googlehealth.sleep.readonly"
 SCOPE_ACTIVITY = "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly"
 SCOPES = (SCOPE_SLEEP, SCOPE_ACTIVITY)
