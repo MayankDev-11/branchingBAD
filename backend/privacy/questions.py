@@ -24,6 +24,28 @@ RED_FLAGS = re.compile(
     re.IGNORECASE,
 )
 
+# Indic scripts contain combining vowel marks and halants that break regex \b boundaries,
+# so match Hindi (Devanagari) and Kannada emergency phrases without word-boundary anchors.
+MULTILINGUAL_RED_FLAGS = re.compile(
+    r"(?:सीने|छाती)\s+में\s+(?:तेज\s+|तेज़\s+)?(?:दर्द|जकड़न|दबाव|भारीपन)|"
+    r"सांस\s+(?:लेने\s+में\s+(?:दिक्कत|तकलीफ|तकलीफ़|परेशानी|कठिनाई)|फूलना|फूल\s+रही|नहीं\s+आ\s+रही|रुक\s+रही)|"
+    r"दम\s+घुट|"
+    r"बेहोश(?:ी)?|चक्कर\s+(?:आकर|खाकर)\s+गिर|"
+    r"एक\s+(?:तरफ|तरफ़|हिस्से)\s+(?:में\s+)?(?:कमजोरी|कमज़ोरी|सुन्न|लकवा)|"
+    r"अचानक\s+(?:बहुत\s+)?(?:तेज|तेज़|भयानक|गंभीर)\s+(?:सिर\s*दर्द|सिरदर्द)|"
+    r"(?:असहनीय|सबसे\s+तेज)\s+(?:सिर\s*दर्द|सिरदर्द)|"
+    r"पेशाब\s+(?:बिल्कुल\s+नहीं|बिलकुल\s+नहीं|नहीं\s+हो\s+रहा|बंद|रुक\s+गया)|"
+    r"मूत्र\s+त्याग\s+करने\s+में\s+असमर्थ|"
+    r"(?:खुद|ख़ुद|अपने\s+आप)\s+को\s+(?:नुकसान|नुक़सान|चोट)|आत्महत्या|खुदकुशी|जान\s+दे(?:ने|ना)|"
+    r"ಎದೆ(?:ಯಲ್ಲಿ)?\s*(?:ತೀವ್ರ\s+)?(?:ನೋವು|ಬಿಗಿತ|ಒತ್ತಡ)|"
+    r"ಉಸಿರಾ(?:ಡಲು\s+(?:ಕಷ್ಟ|ತೊಂದರೆ)|ಟದ\s+ತೊಂದರೆ|ಟ\s+ಕಷ್ಟ)|ಉಸಿರು\s*(?:ಗಟ್ಟ|ಕಟ್ಟ)|"
+    r"ಮೂರ್ಛೆ|ಪ್ರಜ್ಞೆ\s*(?:ತಪ್ಪ|ಕಳೆದುಕೊ)|"
+    r"ಒಂದು\s*(?:ಬದಿ(?:ಯಲ್ಲಿ|ಯ)?|ಕಡೆ)\s*(?:ದೌರ್ಬಲ್ಯ|ಬಲಹೀನತೆ|ಮರಗಟ್ಟ|ಪಕ್ಷಪಾತ)|"
+    r"(?:ಹಠಾತ್|ಹಠಾತ್ತನೆ|ದಿಢೀರ್)\s*(?:ತೀವ್ರ|ಅತಿಯಾದ)?\s*ತಲೆ\s*ನೋವು|"
+    r"ಮೂತ್ರ\s*(?:ವಿಸರ್ಜನೆ\s+ಆಗುತ್ತಿಲ್ಲ|ಬರುತ್ತಿಲ್ಲ|ತಡೆ|ನಿಂತು)|"
+    r"ಆತ್ಮಹತ್ಯೆ|ಸ್ವಯಂ\s*ಹಾನಿ|(?:ನನ್ನನ್ನು\s*ನಾನೇ|ಸ್ವತಃ)\s*ನೋಯಿಸ|ಪ್ರಾಣ\s*ತೆಗೆದುಕೊ"
+)
+
 IDENTIFIERS = (
     re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b", re.IGNORECASE),
     re.compile(r"(?<!\d)(?:\d[ -]?){11}\d(?!\d)"),
@@ -38,7 +60,8 @@ def normalized(text: str) -> str:
 
 
 def is_red_flag(question: str) -> bool:
-    return RED_FLAGS.search(normalized(question)) is not None
+    clean = normalized(question)
+    return RED_FLAGS.search(clean) is not None or MULTILINGUAL_RED_FLAGS.search(clean) is not None
 
 
 @lru_cache(maxsize=1)

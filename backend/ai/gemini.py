@@ -6,6 +6,7 @@ import time
 from typing import Literal
 
 import httpx
+from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
 MODEL_ID = "gemini-3.5-flash-lite"
@@ -35,6 +36,119 @@ class Draft(BaseModel):
 class DraftSelection(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     drafts: list[Draft] = Field(max_length=3)
+
+
+class Translation(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    translated_text: str
+
+
+_LANGUAGE_LABELS = {
+    "en": "English",
+    "hi": "Hindi (written in Devanagari script)",
+    "kn": "Kannada (written in Kannada script)",
+}
+
+
+def _translation_system(target_label: str, preserve_clinical_tokens: bool) -> str:
+    rules = (
+        "You translate short health tracking summaries and user questions into "
+        f"{target_label}. Do not add medical advice, diagnoses, or extra commentary."
+    )
+    if preserve_clinical_tokens:
+        rules += (
+            " Keep every [REDACTED] marker, ASCII digit/number, percentage, unit, "
+            "and alphanumeric record ID (such as sl_0412, ce_1, br_1, exp_1) verbatim."
+        )
+    return rules
+
+
+def _valid_translation(source: str, candidate: str, preserve_clinical_tokens: bool) -> bool:
+    if not candidate:
+        return False
+    if preserve_clinical_tokens and source.count("[REDACTED]") != candidate.count("[REDACTED]"):
+        return False
+    return True
+
+
+def _translate_gemini(source: str, system: str, api_key: str) -> str:
+    payload = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": source}]}],
+        "generationConfig": {
+            "temperature": 0,
+            "maxOutputTokens": 1024,
+            "responseMimeType": "application/json",
+            "responseJsonSchema": Translation.model_json_schema(),
+        },
+        "safetySettings": [
+            {"category": category, "threshold": "BLOCK_MEDIUM_AND_ABOVE"}
+            for category in (
+                "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
+                "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT",
+            )
+        ],
+    }
+    response = _post_with_retries(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), api_key)
+    candidate = response.json()["candidates"][0]
+    if candidate.get("finishReason") != "STOP":
+        return ""
+    output = "".join(
+        part["text"] for part in candidate["content"]["parts"]
+        if "text" in part and not part.get("thought")
+    )
+    return Translation.model_validate_json(output).translated_text.strip()
+
+
+def _translate_bedrock(source: str, system: str, model_id: str) -> str:
+    from boto3 import client
+    from botocore.config import Config
+
+    bedrock = client("bedrock-runtime", region_name="ap-south-1", config=Config(
+        connect_timeout=5, read_timeout=20, retries={"total_max_attempts": 2},
+    ))
+    response = bedrock.converse(
+        modelId=model_id,
+        system=[{"text": f"{system} Output only the translated text."}],
+        messages=[{"role": "user", "content": [{"text": source}]}],
+        inferenceConfig={"maxTokens": 1024, "temperature": 0},
+    )
+    parts = [
+        block["text"] for block in response.get("output", {}).get("message", {}).get("content", [])
+        if isinstance(block.get("text"), str)
+    ]
+    return " ".join(parts).strip()
+
+
+def translate_text(
+    text: str,
+    target_language: str,
+    preserve_clinical_tokens: bool = True,
+) -> str:
+    """Translate text when a configured AI provider succeeds, else fall back to original text."""
+    source = text.strip()
+    target = (target_language or "").strip().lower()
+    if not source or not target:
+        return text
+
+    load_dotenv()
+    provider = os.environ.get("ROOTTRACE_AI_PROVIDER", "").strip().lower()
+    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    bedrock_model = os.environ.get("BEDROCK_MODEL_ID", "").strip()
+    system = _translation_system(_LANGUAGE_LABELS.get(target, target), preserve_clinical_tokens)
+
+    try:
+        if (provider == "gemini" or (not provider and gemini_key)) and gemini_key:
+            translated = _translate_gemini(source, system, gemini_key)
+            if _valid_translation(source, translated, preserve_clinical_tokens):
+                return translated
+        if (provider == "bedrock" or (not provider and bedrock_model)) and bedrock_model:
+            translated = _translate_bedrock(source, system, bedrock_model)
+            if _valid_translation(source, translated, preserve_clinical_tokens):
+                return translated
+    except Exception:
+        return text
+    return text
 
 
 def select_ranks(topic: str, hypotheses: list[dict]) -> tuple[list[int], str]:
