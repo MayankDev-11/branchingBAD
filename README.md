@@ -70,7 +70,7 @@ Open two terminals, both in the repo root.
 py -3.12 -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn backend.main:app --reload
+uvicorn backend.main:app --reload --port 8000
 ```
 
 ```bash
@@ -78,8 +78,12 @@ uvicorn backend.main:app --reload
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn backend.main:app --reload
+uvicorn backend.main:app --reload --port 8000
 ```
+
+> [!NOTE]
+> Always run Uvicorn with a single worker (`--workers 1`, the default) because `DemoStore.clock` and `LoginRateLimiter` live in process memory.
+> If you host the frontend on Vercel (`frontend/vercel.json` handles SPA routing to `/index.html`) separately from the backend, add an `/api/:path*` rewrite in `frontend/vercel.json` pointing to your backend URL so the `HttpOnly`, `SameSite=Lax` session cookie stays same-origin.
 
 **Terminal 2: website, http://localhost:5173**
 
@@ -114,11 +118,11 @@ You can also create your own account with **New User**. Passwords are hashed wit
 | Insights, Profile, Data & help, History replay | ✅ Works. Every number comes from the backend. |
 | Raw record view for every cited record | ✅ Works |
 | Apple Health import (command line and upload box) | ✅ Works, into its own separate database |
-| Audio brief | ✅ Works with the browser's built-in voice; ElevenLabs voice if a key is set |
-| **Ask box (AI answers, "What the AI saw", red-flag check)** | ⏳ Not merged yet (AI, privacy and integration layer). It shows an error banner for now. |
-| **Weekly report** (`/api/report/weekly`) | ⏳ Not merged yet |
-| **"New Branch" button** (asking a brand-new question) | ⏳ Planned for hack day. There is no backend route for it yet. |
-| Connect with Google Health, Obsidian ZIP export | ⏳ Planned for hack day. A single-file Obsidian export works today. |
+| Audio brief | ✅ Works with the browser's built-in voice; ElevenLabs voice if `ELEVENLABS_API_KEY` is set |
+| **Ask box (AI answers, "What the AI saw", red-flag check)** | ✅ Works (Bedrock or Gemini free-tier mode via `ROOTTRACE_AI_PROVIDER`) |
+| **Weekly report** (`/api/report/weekly`) & **Obsidian ZIP** (`/api/export/obsidian`) | ✅ Works on live API routes |
+| **"New Branch" button** (manual & ElevenLabs voice + Gemini drafts + resolve/dissolve) | ✅ Works, persisted in `data/roottrace_workspace.db` |
+| Connect with Google Health | ⏳ Planned (OAuth stub notice in UI) |
 
 ## How it works
 
@@ -161,7 +165,9 @@ All `/api/*` data routes need the sign-in cookie. Exact response shapes are in [
 | `POST /api/demo/advance` · `POST /api/demo/reset` | Move the demo clock forward, or back to 20 Nov |
 | `GET /api/insights` | Every number for the Insights, Profile and Data & help pages |
 | `POST /api/import/apple-health` | Import an uploaded Apple Health export |
-| `POST /api/ask` · `GET /api/report/weekly` | AI answers and weekly report (not merged yet) |
+| `POST /api/ask` · `GET /api/report/weekly` · `GET /api/export/obsidian` | AI answers, cited weekly report + audio, and Obsidian vault ZIP |
+| `POST /api/branches` · `GET /api/branches/history` · `POST /api/branches/{id}/transition` · `GET/POST /api/branches/{id}/drafts` · `GET /api/knowledge` | Workspace branch creation, Gemini hypothesis drafts, resolution memory, and replay history |
+| `POST /api/voice/synthesize` · `POST /api/voice/transcribe` | Server-side ElevenLabs TTS narration and Scribe STT transcription |
 
 ## Using your own Apple Health data (optional)
 
@@ -223,6 +229,7 @@ Optional environment variables (the defaults work out of the box):
 | `ROOTTRACE_DB` | `backend/data/roottrace.db` | Demo database |
 | `ROOTTRACE_AUTH_DB_PATH` | `backend/data/roottrace_auth.db` | Accounts and sessions |
 | `ROOTTRACE_IMPORT_DB` | `backend/data/apple_health.db` | Where uploads are imported |
+| `ROOTTRACE_WORKSPACE_DB` | `data/roottrace_workspace.db` | User-created branches and resolutions |
 | `FRONTEND_ORIGINS` | `http://localhost:5173` | Extra allowed origins, comma-separated |
 
 ## Tests

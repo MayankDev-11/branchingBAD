@@ -10,7 +10,7 @@ from pydantic import BaseModel, StringConstraints
 
 from backend.auth.dependencies import CurrentUser, get_current_user
 from backend.integrations.weekly import DEFAULT_VOICE_ID, VOICE_ID, AudioUnavailable, render_audio
-from backend.privacy.questions import PrivacyUnavailable, scrub_question
+from backend.privacy.questions import PrivacyUnavailable, scrub_identifiers, scrub_question
 
 router = APIRouter(prefix="/api/voice", tags=["ElevenLabs"])
 User = Annotated[CurrentUser, Depends(get_current_user)]
@@ -46,10 +46,12 @@ def synthesize(body: SpeechRequest, user: User) -> Response:
     if not VOICE_ID.fullmatch(voice):
         raise HTTPException(503, "Configure a valid ELEVENLABS_VOICE_ID.")
     try:
-        clean = scrub_question(body.text, user.full_name, user.email)
+        try:
+            clean = scrub_question(body.text, user.full_name, user.email)
+        except PrivacyUnavailable:
+            # Fall back to deterministic regex + user-identifier scrubbing when spaCy/Presidio is not installed.
+            clean = scrub_identifiers(body.text, user.full_name, user.email)
         audio = render_audio(voice, key, {"model_id": "eleven_multilingual_v2", "text": clean})
-    except PrivacyUnavailable:
-        raise HTTPException(503, "Local privacy setup is required for narration.") from None
     except AudioUnavailable as exc:
         raise HTTPException(exc.status_code, str(exc)) from None
     return Response(audio, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})

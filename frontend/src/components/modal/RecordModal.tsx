@@ -6,6 +6,7 @@ import type { AskResponse, RecordDetailResponse } from '../../types';
 
 interface RecordModalProps {
   record: RecordDetailResponse | null;
+  auditOnlyOpen?: boolean;
   // The last real /api/ask response, or null if nothing has been sent to the AI yet.
   askContext: AskResponse | null;
   initialTab: 'raw' | 'ai';
@@ -14,15 +15,16 @@ interface RecordModalProps {
 
 export const RecordModal: React.FC<RecordModalProps> = ({
   record,
+  auditOnlyOpen = false,
   askContext,
   initialTab,
   onClose,
 }) => {
-  const [tab, setTab] = useState<'raw' | 'ai'>(initialTab);
+  const [tab, setTab] = useState<'raw' | 'ai'>(record ? initialTab : 'ai');
 
   useEffect(() => {
-    setTab(initialTab);
-  }, [initialTab, record]);
+    setTab(record ? initialTab : 'ai');
+  }, [initialTab, record, auditOnlyOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -32,10 +34,11 @@ export const RecordModal: React.FC<RecordModalProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  if (!record) return null;
+  if (!record && !auditOnlyOpen) return null;
 
   const sentToAi = askContext?.sent_to_ai ?? '';
   const audit = readAskAudit(sentToAi);
+  const activeTab = record ? tab : 'ai';
 
   const content = (
     <div
@@ -53,7 +56,9 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       >
         {/* Modal Header */}
         <div className="flex items-center justify-between">
-          <h3 className="font-mono text-[15px] font-bold text-t2">Record {record.id}</h3>
+          <h3 className="font-mono text-[15px] font-bold text-t2">
+            {record ? `Record ${record.id}` : 'Ask Audit Log'}
+          </h3>
           <button
             type="button"
             onClick={onClose}
@@ -66,31 +71,33 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         </div>
 
         {/* Pill Tabs */}
-        <div
-          className="mt-4 inline-flex p-1 rounded-xl"
-          style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
-        >
-          {(['raw', 'ai'] as const).map((t) => {
-            const active = tab === t;
-            return (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTab(t)}
-                className="px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-all"
-                style={{
-                  backgroundColor: active ? 'rgba(20, 184, 166, 0.18)' : 'transparent',
-                  color: active ? 'var(--branch-open)' : 'var(--t3)',
-                }}
-              >
-                {t === 'raw' ? 'Raw record' : 'What the AI saw'}
-              </button>
-            );
-          })}
-        </div>
+        {record && (
+          <div
+            className="mt-4 inline-flex p-1 rounded-xl"
+            style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
+          >
+            {(['raw', 'ai'] as const).map((t) => {
+              const active = activeTab === t;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTab(t)}
+                  className="px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-all"
+                  style={{
+                    backgroundColor: active ? 'rgba(20, 184, 166, 0.18)' : 'transparent',
+                    color: active ? 'var(--branch-open)' : 'var(--t3)',
+                  }}
+                >
+                  {t === 'raw' ? 'Raw record' : 'What the AI saw'}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* TAB 1: RAW RECORD */}
-        {tab === 'raw' ? (
+        {activeTab === 'raw' && record ? (
           <div className="mt-5">
             <div className="font-mono text-[9.5px] uppercase tracking-wider text-t3">Value</div>
             <div className="mt-1 font-serif text-[28px] text-branchOpen leading-tight">
@@ -202,7 +209,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
 
             {sentToAi && (
               <details
-                key={record.id}
+                key={record?.id ?? 'ask-audit'}
                 className="group rounded-xl"
                 style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
               >
@@ -220,18 +227,20 @@ export const RecordModal: React.FC<RecordModalProps> = ({
             )}
 
             {/* Compact Raw Summary Strip */}
-            <div
-              className="rounded-xl px-4 py-3"
-              style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border)' }}
-            >
-              <div className="font-mono text-[9.5px] uppercase text-t3">
-                Local record only · {record.id}
+            {record && (
+              <div
+                className="rounded-xl px-4 py-3"
+                style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border)' }}
+              >
+                <div className="font-mono text-[9.5px] uppercase text-t3">
+                  Local record only · {record.id}
+                </div>
+                <div className="mt-1 font-mono text-[11.5px] text-t1">
+                  {record.value} {record.unit} ({record.display}) · {record.date} · {record.device} ·
+                  Quality {record.data_quality}
+                </div>
               </div>
-              <div className="mt-1 font-mono text-[11.5px] text-t1">
-                {record.value} {record.unit} ({record.display}) · {record.date} · {record.device} ·
-                Quality {record.data_quality}
-              </div>
-            </div>
+            )}
 
             {askContext && askContext.dropped_claims > 0 && (
               <span

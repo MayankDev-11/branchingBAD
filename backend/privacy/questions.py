@@ -61,13 +61,18 @@ def _analyzer():
         raise PrivacyUnavailable("Install the local Presidio dependencies.") from exc
 
 
-def scrub_question(question: str, full_name: str = "", email: str = "") -> str:
-    text = normalized(question)
+def scrub_identifiers(text: str, full_name: str = "", email: str = "") -> str:
+    text = normalized(text)
     for identifier in (email, full_name, *normalized(full_name).split()):
         if identifier:
             text = re.sub(rf"(?<!\w){re.escape(normalized(identifier))}(?!\w)", "[REDACTED]", text, flags=re.I)
     for pattern in IDENTIFIERS:
         text = pattern.sub("[REDACTED]", text)
+    return text
+
+
+def scrub_question(question: str, full_name: str = "", email: str = "") -> str:
+    text = scrub_identifiers(question, full_name, email)
 
     findings = _analyzer().analyze(text=text, language="en")
     # Merge overlaps before replacing so offsets always refer to the original string.

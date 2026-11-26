@@ -89,14 +89,14 @@ def weekly_report() -> dict:
     voice = os.environ.get("ELEVENLABS_VOICE_ID", "").strip() or DEFAULT_VOICE_ID
     key = os.environ.get("ELEVENLABS_API_KEY")
     if not VOICE_ID.fullmatch(voice):
-        raise AudioUnavailable("Configure ELEVENLABS_VOICE_ID.")
+        raise AudioUnavailable("Configure ELEVENLABS_VOICE_ID.", 503)
     payload = {"model_id": "eleven_multilingual_v2", "text": "\n".join(line["text"] for line in lines)}
     digest = hashlib.sha256(json.dumps([voice, payload], sort_keys=True).encode()).hexdigest()
 
     with CACHE_LOCK:
         if audio_path(digest) is None:
             if not key:
-                raise AudioUnavailable("Configure ELEVENLABS_API_KEY.")
+                raise AudioUnavailable("Configure ELEVENLABS_API_KEY.", 503)
             try:
                 audio = render_audio(voice, key, payload)
                 CACHE.mkdir(parents=True, exist_ok=True)

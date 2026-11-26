@@ -12,6 +12,7 @@ _TMP = tempfile.mkdtemp(prefix="roottrace-test-")
 os.environ["ROOTTRACE_DB"] = os.path.join(_TMP, "test.db")
 os.environ["ROOTTRACE_AUTH_DB_PATH"] = os.path.join(_TMP, "auth.db")
 os.environ["ROOTTRACE_IMPORT_DB"] = os.path.join(_TMP, "apple_health.db")
+os.environ["ROOTTRACE_WORKSPACE_DB"] = os.path.join(_TMP, "workspace.db")
 
 
 @pytest.fixture

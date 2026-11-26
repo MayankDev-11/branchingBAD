@@ -1,11 +1,14 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.auth import auth_router, get_current_user, init_auth_db
-from backend.routes import branches, experiments, graph, insights
+from backend.integrations.branches import router as workspace_router
+from backend.integrations.routes import router as integrations_router
+from backend.integrations.voice import router as voice_router
+from backend.routes import branches, experiments, insights
 
 # Exact origins only: cookies are sent with allow_credentials, so never '*'.
 FRONTEND_ORIGINS = list(dict.fromkeys(
@@ -35,16 +38,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Satwik's sign-in routes: /api/auth/register, /login, /logout, /me, /demo.
+
+@app.middleware("http")
+async def add_api_no_store_header(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+# Sign-in routes: /api/auth/register, /login, /logout, /me, /demo.
 app.include_router(auth_router)
 
-# Parikshit's routes (contracts/api.md 1-5) need a signed-in session cookie.
-# Mayank's /api/ask and /api/report/weekly plug in the same way.
-signed_in = [Depends(get_current_user)]
-app.include_router(graph.router, dependencies=signed_in)
-app.include_router(branches.router, dependencies=signed_in)
-app.include_router(experiments.router, dependencies=signed_in)
-app.include_router(insights.router, dependencies=signed_in)
+# Mount workspace_router before core fallback routes so /api/branches/history,
+# /api/graph, and /api/demo/* resolve cleanly without path shadowing.
+app.include_router(workspace_router)
+app.include_router(integrations_router)
+app.include_router(voice_router)
+
+core_routes = APIRouter()
+for source, paths in (
+    (branches.router, {"/api/records/{record_id}"}),
+    (experiments.router, {"/api/experiments/{experiment_id}/lock"}),
+    (insights.router, {"/api/insights", "/api/import/apple-health"}),
+):
+    core_routes.routes.extend(route for route in source.routes if route.path in paths)
+app.include_router(core_routes, dependencies=[Depends(get_current_user)])
 
 
 @app.get("/")

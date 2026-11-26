@@ -106,6 +106,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
   const [outcome, setOutcome] = useState<NonNullable<CreateBranchInput['outcome']>>('auto');
   const [startDate, setStartDate] = useState('2026-11-18');
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   // Voice + ElevenLabs state
   const [voicePhase, setVoicePhase] = useState<'idle' | 'requesting' | 'recording' | 'transcribing'>('idle');
@@ -120,6 +121,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
   useEffect(() => {
     setVoicePhase('idle');
     setVoiceStatus('');
+    setSubmitError('');
     return () => {
       captureVersion.current += 1;
       const recorder = mediaRecorderRef.current;
@@ -276,6 +278,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
     e.preventDefault();
     if (!title.trim()) return;
     setSubmitting(true);
+    setSubmitError('');
     try {
       const hyps = hypInput
         .split(',')
@@ -297,6 +300,8 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
       setOutcome('auto');
       setTranscript('');
       onClose();
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Could not create branch.');
     } finally {
       setSubmitting(false);
     }
@@ -567,6 +572,12 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
               />
             </div>
           </div>
+
+          {submitError && (
+            <p role="alert" className="text-[12px] text-change">
+              {submitError}
+            </p>
+          )}
 
           {/* Submit */}
           <div className="pt-2 flex items-center justify-end gap-2.5">

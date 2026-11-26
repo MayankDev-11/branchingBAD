@@ -24,6 +24,7 @@ interface InvestigationPanelProps {
   onClose: () => void;
   onClearAsk: () => void;
   onOpenRecord: (recordId: string, tab?: 'raw' | 'ai') => void;
+  onOpenAskAudit?: () => void;
   onLockExperiment: (expId: string) => void;
   onBranchTransition: (id: string, action: BranchAction, resolution?: string) => Promise<void>;
   resolution: string | null;
@@ -194,6 +195,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   onClose,
   onClearAsk,
   onOpenRecord,
+  onOpenAskAudit,
   onLockExperiment,
   onBranchTransition,
   resolution,
@@ -345,10 +347,11 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
 
           <button
             type="button"
-            disabled={!askResult.sent_to_ai || !askResult.hypotheses[0]?.claims[0]?.record_ids[0]}
+            disabled={!askResult.sent_to_ai}
             onClick={() => {
               const rid = askResult.hypotheses[0]?.claims[0]?.record_ids[0];
               if (rid) onOpenRecord(rid, 'ai');
+              else onOpenAskAudit?.();
             }}
             className="px-2.5 py-1.5 rounded-lg font-mono text-[10px] font-semibold text-branchOpen shrink-0 disabled:opacity-40"
             style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border-strong)' }}
@@ -520,7 +523,12 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           </button>
           <div className="min-w-0">
             <div className="font-mono text-[9.5px] text-t3">
-              Investigation · {branch.status === 'open' ? `Open since ${startedOn}` : 'Concluded'}
+              Investigation ·{' '}
+              {branch.status === 'open'
+                ? `Open since ${startedOn}`
+                : branch.status === 'inconclusive'
+                ? 'Dissolved'
+                : 'Concluded'}
             </div>
             <h2 className="font-serif italic text-[17.5px] text-t1 leading-snug truncate">
               {branch.title}
@@ -537,7 +545,13 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           }}
         >
           <span className="w-1.5 h-1.5 rounded-full bg-current" />
-          {branch.status === 'open' ? 'Open' : workspace ? 'Resolved' : 'Concluded'}
+          {branch.status === 'open'
+            ? 'Open'
+            : branch.status === 'inconclusive'
+            ? 'Dissolved'
+            : workspace
+            ? 'Resolved'
+            : 'Concluded'}
         </span>
       </div>
 
@@ -671,7 +685,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-mono text-[9.5px] font-semibold transition-colors"
                 style={{
                   backgroundColor: speakingSummary ? 'var(--trunk)' : 'var(--s2)',
-                  color: speakingSummary ? '#030c0e' : 'var(--branch-open)',
+                  color: speakingSummary ? 'var(--btn-ink)' : 'var(--branch-open)',
                   border: '1px solid var(--border-strong)',
                 }}
               >
@@ -765,7 +779,14 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
             </div>
 
             <div className="font-mono text-[9.5px] text-t3 leading-relaxed">
-              {exp.success_criterion} · locked Nov 10 (enforced by SQLite trigger)
+              {exp.success_criterion}
+              {exp.locked && exp.locked_at
+                ? ` · locked ${new Date(exp.locked_at).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    timeZone: 'UTC',
+                  })} (enforced by SQLite trigger)`
+                : ''}
             </div>
           </div>
         )}

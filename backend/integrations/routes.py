@@ -102,8 +102,8 @@ def report_route(response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store"
     try:
         return weekly_report()
-    except AudioUnavailable:
-        raise HTTPException(503, "Weekly audio is unavailable. Check ElevenLabs setup.") from None
+    except AudioUnavailable as exc:
+        raise HTTPException(exc.status_code, str(exc)) from None
 
 
 @router.get("/report/weekly/audio/{audio_id}")

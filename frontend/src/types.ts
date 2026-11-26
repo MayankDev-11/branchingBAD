@@ -1,16 +1,6 @@
 export type ThemeMode = 'slate-pro' | 'teal' | 'warm-neuro' | 'lab-ivory' | 'ppt-light';
 export type NavView = 'dashboard' | 'investigations' | 'insights' | 'history' | 'profile' | 'privacy' | 'connect';
 
-export interface DataSourceSummary {
-  id: string;
-  name: string;
-  sourceType: 'apple_health' | 'google_health' | 'manual_voice';
-  connected: boolean;
-  recordCount: number;
-  lastSynced: string;
-  detail: string;
-}
-
 export interface TrunkDay {
   date: string;
   sleep_min: number;

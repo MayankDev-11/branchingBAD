@@ -64,6 +64,7 @@ export const App: React.FC = () => {
 
   const [modalRecord, setModalRecord] = useState<RecordDetailResponse | null>(null);
   const [modalTab, setModalTab] = useState<'raw' | 'ai'>('raw');
+  const [askAuditModalOpen, setAskAuditModalOpen] = useState(false);
 
   const [newBranchOpen, setNewBranchOpen] = useState(false);
   const [newBranchMode, setNewBranchMode] = useState<'manual' | 'voice'>('manual');
@@ -79,27 +80,27 @@ export const App: React.FC = () => {
   const loadInitialData = useCallback(async () => {
     try {
       setErrorMsg(null);
-      // Insights load on their own so the graph still shows if that one request fails.
+      // Insights and workspace history load on their own so the graph always renders.
       const insightsRequest = api.getInsights().then(setInsights);
-      const [g, br0, br1, history] = await Promise.all([
+      const historyRequest = api.getBranchHistory().then(async (history) => {
+        setWorkspaceHistory(history);
+        const workspaceDetails = await Promise.allSettled(history.map(({ id }) => api.getBranch(id)));
+        setBranchDetailsMap((prev) => ({
+          ...prev,
+          ...Object.fromEntries(workspaceDetails.flatMap((result) =>
+            result.status === 'fulfilled' ? [[result.value.id, result.value]] : []
+          )),
+        }));
+      });
+      const [g, br0, br1] = await Promise.all([
         api.getGraph(),
         api.getBranch('br_0'),
         api.getBranch('br_1'),
-        api.getBranchHistory(),
       ]);
       setGraph(g);
-      setWorkspaceHistory(history);
-      setBranchDetailsMap({ br_0: br0, br_1: br1 });
+      setBranchDetailsMap((prev) => ({ ...prev, br_0: br0, br_1: br1 }));
       setIsDataConnected(true);
-      const pendingBranches = history;
-      const workspaceDetails = await Promise.allSettled(pendingBranches.map(({ id }) => api.getBranch(id)));
-      setBranchDetailsMap((prev) => ({
-        ...prev,
-        ...Object.fromEntries(workspaceDetails.flatMap((result) =>
-          result.status === 'fulfilled' ? [[result.value.id, result.value]] : []
-        )),
-      }));
-      await insightsRequest;
+      await Promise.all([insightsRequest, historyRequest]);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to load RootTrace data');
     }
@@ -143,11 +144,18 @@ export const App: React.FC = () => {
   const handleOpenRecord = useCallback(async (recordId: string, tab: 'raw' | 'ai' = 'raw') => {
     try {
       const rec = await api.getRecord(recordId);
+      setAskAuditModalOpen(false);
       setModalTab(tab);
       setModalRecord(rec);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Could not load record');
     }
+  }, []);
+
+  const handleOpenAskAudit = useCallback(() => {
+    setModalRecord(null);
+    setModalTab('ai');
+    setAskAuditModalOpen(true);
   }, []);
 
   const handleAskSubmit = async (question: string) => {
@@ -214,14 +222,34 @@ export const App: React.FC = () => {
   };
 
   const handleAdvanceDemo = async (days: number) => {
-    setDemoDaysAdvanced(days);
-    const updatedGraph = await api.advanceClock(days);
-    setGraph(updatedGraph);
-    const [br0, br1, ins] = await Promise.all([api.getBranch('br_0'), api.getBranch('br_1'), api.getInsights()]);
-    setBranchDetailsMap((prev) => ({ ...prev, br_0: br0, br_1: br1 }));
-    setInsights(ins);
-    if (selectedBranchId === 'br_1') {
-      setSelectedBranch(br1);
+    try {
+      setErrorMsg(null);
+      const updatedGraph = await api.advanceClock(days);
+      setDemoDaysAdvanced(days);
+      setGraph(updatedGraph);
+      const customIds = updatedGraph.branches
+        .map((b) => b.id)
+        .filter((id) => id.startsWith('br_custom_'));
+      const [[br0, br1, ins], customResults] = await Promise.all([
+        Promise.all([api.getBranch('br_0'), api.getBranch('br_1'), api.getInsights()]),
+        Promise.allSettled(customIds.map((id) => api.getBranch(id))),
+      ]);
+      const refreshedCustom = Object.fromEntries(
+        customResults.flatMap((result) =>
+          result.status === 'fulfilled' ? [[result.value.id, result.value]] : []
+        )
+      );
+      setBranchDetailsMap((prev) => ({ ...prev, ...refreshedCustom, br_0: br0, br_1: br1 }));
+      setInsights(ins);
+      if (selectedBranchId === 'br_0') {
+        setSelectedBranch(br0);
+      } else if (selectedBranchId === 'br_1') {
+        setSelectedBranch(br1);
+      } else if (selectedBranchId && refreshedCustom[selectedBranchId]) {
+        setSelectedBranch(refreshedCustom[selectedBranchId]);
+      }
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to update demo clock');
     }
   };
 
@@ -343,6 +371,7 @@ export const App: React.FC = () => {
                             setAskQuestion(null);
                           }}
                           onOpenRecord={handleOpenRecord}
+                          onOpenAskAudit={handleOpenAskAudit}
                           onLockExperiment={handleLockExperiment}
                           onBranchTransition={handleBranchTransition}
                           onGenerateDrafts={handleGenerateBranchDrafts}
@@ -417,9 +446,13 @@ export const App: React.FC = () => {
 
       <RecordModal
         record={modalRecord}
+        auditOnlyOpen={askAuditModalOpen}
         askContext={USE_MOCK ? askResult ?? api.getDefaultAskSample() : askResult}
         initialTab={modalTab}
-        onClose={() => setModalRecord(null)}
+        onClose={() => {
+          setModalRecord(null);
+          setAskAuditModalOpen(false);
+        }}
       />
 
       <NewBranchModal

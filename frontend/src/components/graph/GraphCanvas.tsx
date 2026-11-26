@@ -192,7 +192,11 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
     const trunkStartX = 40;
     const extraBranches = graph.branches.filter((branch) => branch.id.startsWith('br_custom_') && branch.status === 'open');
     const resolutions = graph.knowledge.filter((item) => item.id.startsWith('kn_br_custom_'));
-    const trunkEndX = Math.max(1960, 1530 + extraBranches.length * 240, 1350 + resolutions.length * 180);
+    const trunkEndX = Math.max(
+      1960,
+      1530 + extraBranches.length * 240 + (extraBranches.length > 0 ? 420 : 0),
+      1350 + resolutions.length * 185
+    );
     n.push(
       { id: 'trunk-start', type: 'anchor', position: { x: trunkStartX, y: TRUNK_Y }, data: {} },
       { id: 'trunk-end', type: 'anchor', position: { x: trunkEndX, y: TRUNK_Y }, data: {} }

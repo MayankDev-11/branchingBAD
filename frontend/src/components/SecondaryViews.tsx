@@ -617,8 +617,8 @@ export const ConnectDataView: React.FC<{
               steps: 'Open Health Connect (Android 14+) → Data and access → Export data → save scheduled ZIP → upload directly.',
             },
             {
-              title: 'Custom CSV / Manual Logs',
-              steps: 'Drop any CSV with columns: date, sleep_min, steps, water_ml, headache. Or use "Speak (ElevenLabs)" on the Dashboard.',
+              title: 'Apple Health ZIP & Manual Logs',
+              steps: 'Upload export.zip or export.xml from Apple Health above, or use "New Branch" and "Speak (ElevenLabs)" on the Dashboard.',
             },
           ].map((g) => (
             <div
@@ -903,10 +903,10 @@ export const PrivacyView: React.FC<{
           <div>
             <div className="flex items-center gap-2 font-mono text-[10.5px] font-bold text-change">
               <AlertTriangle className="w-4 h-4" />
-              <span>DATA OWNERSHIP · PERMANENT WIPE</span>
+              <span>LOCAL VIEW · RESET DEMO STATE</span>
             </div>
             <p className="mt-1 text-[12px] text-t2">
-              Delete all imported observations, cached audio, and uploaded files immediately.
+              Disconnects the active demo dataset in this browser view without altering server databases.
             </p>
           </div>
 
@@ -930,7 +930,7 @@ export const PrivacyView: React.FC<{
                   border: '1px solid rgba(255, 77, 109, 0.42)',
                 }}
               >
-                <Trash2 className="w-3.5 h-3.5" /> Delete all my data
+                <Trash2 className="w-3.5 h-3.5" /> Disconnect local view
               </button>
             ) : (
               <>
@@ -943,7 +943,7 @@ export const PrivacyView: React.FC<{
                   className="px-4 py-2 rounded-xl text-[12px] font-semibold text-white"
                   style={{ backgroundColor: 'var(--change)' }}
                 >
-                  Confirm Permanent Wipe
+                  Confirm Disconnect View
                 </button>
                 <button
                   type="button"
