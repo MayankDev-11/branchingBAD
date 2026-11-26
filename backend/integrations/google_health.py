@@ -17,6 +17,10 @@ Flow
 Settings (.env): GOOGLE_HEALTH_CLIENT_ID, GOOGLE_HEALTH_CLIENT_SECRET, optional
 GOOGLE_HEALTH_REDIRECT_URI (default http://localhost:5173/api/connect/google/callback, which the
 Vite dev server proxies to the backend so the sign-in cookie comes along).
+
+Judge Demo: inside `with simulated():` (connect.py uses it for the demo account only) every Google
+request is answered by google_health_sim instead, and the sign-in page is our own SIMULATED one.
+The rest of the flow (state, tokens, import, change detection) is exactly the real code.
 """
 
 import base64
@@ -26,7 +30,8 @@ import os
 import secrets
 import sqlite3
 import time as clock
-from contextlib import closing
+from contextlib import closing, contextmanager
+from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
@@ -40,12 +45,12 @@ from backend.data.db import connect, dumps, init_schema, loads
 from backend.data.import_apple_health import IST, PLAUSIBLE, _next_numbers, clean_source_name
 from backend.data.metrics import METRICS
 
-# Google's real endpoints. The GOOGLE_HEALTH_*_URL overrides exist only for local testing against a
-# stand-in server (e.g. a recorded walkthrough without a real Google account); leave them unset.
-AUTH_URL = os.environ.get("GOOGLE_HEALTH_AUTH_URL") or "https://accounts.google.com/o/oauth2/v2/auth"
-TOKEN_URL = os.environ.get("GOOGLE_HEALTH_TOKEN_URL") or "https://oauth2.googleapis.com/token"
-REVOKE_URL = os.environ.get("GOOGLE_HEALTH_REVOKE_URL") or "https://oauth2.googleapis.com/revoke"
-API = os.environ.get("GOOGLE_HEALTH_API_URL") or "https://health.googleapis.com/v4/users/me"
+AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+TOKEN_URL = "https://oauth2.googleapis.com/token"
+REVOKE_URL = "https://oauth2.googleapis.com/revoke"
+API = "https://health.googleapis.com/v4/users/me"
+SIMULATED_AUTH_URL = "/api/connect/google/simulated-consent"   # Judge Demo only
+SIMULATED_REDIRECT = "/api/connect/google/callback"
 SCOPE_SLEEP = "https://www.googleapis.com/auth/googlehealth.sleep.readonly"
 SCOPE_ACTIVITY = "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly"
 SCOPES = (SCOPE_SLEEP, SCOPE_ACTIVITY)
@@ -105,7 +110,27 @@ class ConnectError(RuntimeError):
 # Settings, storage and encryption
 # ---------------------------------------------------------------------------------------------
 
+_SIMULATED: ContextVar[bool] = ContextVar("google_health_simulated", default=False)
+
+
+@contextmanager
+def simulated():
+    """Answer every Google request from google_health_sim (the Judge Demo account only)."""
+    token = _SIMULATED.set(True)
+    try:
+        yield
+    finally:
+        _SIMULATED.reset(token)
+
+
+def is_simulated() -> bool:
+    return _SIMULATED.get()
+
+
 def _settings() -> dict:
+    if is_simulated():
+        return {"client_id": "simulated-demo-client", "client_secret": "simulated",
+                "redirect_uri": SIMULATED_REDIRECT}
     load_dotenv()
     return {
         "client_id": os.environ.get("GOOGLE_HEALTH_CLIENT_ID", "").strip(),
@@ -172,6 +197,10 @@ def _open(value: str | None) -> str | None:
 # ---------------------------------------------------------------------------------------------
 
 def _request(method: str, url: str, **kwargs) -> httpx.Response:
+    if is_simulated():
+        from backend.integrations import google_health_sim
+
+        return google_health_sim.handle(method, url, **kwargs)
     kwargs.setdefault("timeout", httpx.Timeout(30, connect=5))
     kwargs.setdefault("follow_redirects", False)
     for attempt in range(len(RETRY_DELAYS) + 1):
@@ -219,7 +248,7 @@ def start_url(user_id: str) -> str:
     with closing(_links_db()) as conn, conn:
         conn.execute("DELETE FROM oauth_states WHERE created_at < ?", (clock.time() - STATE_TTL_SECONDS,))
         conn.execute("INSERT INTO oauth_states VALUES (?, ?, ?, ?)", (state, user_id, verifier, clock.time()))
-    return AUTH_URL + "?" + urlencode({
+    return (SIMULATED_AUTH_URL if is_simulated() else AUTH_URL) + "?" + urlencode({
         "client_id": s["client_id"],
         "redirect_uri": s["redirect_uri"],
         "response_type": "code",
@@ -574,6 +603,7 @@ def status(user_id: str) -> dict:
     connected = bool(link and link["refresh_token"])
     return {
         "configured": configured(),
+        "simulated": is_simulated(),
         "connected": connected,
         "needs_reconnect": bool(link and not link["refresh_token"]),
         "linked_at": link["linked_at"] if link else None,

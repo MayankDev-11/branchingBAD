@@ -174,7 +174,9 @@ export const ProfileView: React.FC<{
               : google?.needs_reconnect
               ? 'Sign-in expired · reconnect in Data & help'
               : 'Not linked · connect in Data & help',
-            detail: 'Read-only Google sign-in for Fitbit & Pixel Watch sleep and steps',
+            detail: google?.simulated
+              ? 'Demo account: simulated Google sign-in with made-up Fitbit sleep and steps'
+              : 'Read-only Google sign-in for Fitbit & Pixel Watch sleep and steps',
             connected: Boolean(google?.connected),
           },
           {

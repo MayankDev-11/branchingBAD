@@ -50,7 +50,12 @@ export const GoogleHealthCard: React.FC<{ result?: string | null }> = ({ result 
   const [error, setError] = useState('');
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [flashDismissed, setFlashDismissed] = useState(false); // the sign-in result shows until the next action
-  const flash = result && !flashDismissed ? RESULT_TEXT[result] ?? FALLBACK : null;
+  const simulated = Boolean(status?.simulated);
+  const flashBase = result && !flashDismissed ? RESULT_TEXT[result] ?? FALLBACK : null;
+  const flash =
+    flashBase && simulated && result === 'connected'
+      ? { ok: true, text: 'Connected (simulated). 90 days of made-up Fitbit sleep and steps were imported.' }
+      : flashBase;
 
   const connect = async () => {
     setError('');
@@ -109,7 +114,14 @@ export const GoogleHealthCard: React.FC<{ result?: string | null }> = ({ result 
             Read-only Google sign-in. RootTrace imports your sleep and daily steps from the last 90 days into your own
             database, never the demo data. Sign-in tokens are stored encrypted; Disconnect revokes them.
           </p>
+          {simulated && (
+            <p className="text-[12px] leading-relaxed" style={{ color: 'var(--change)' }}>
+              Demo account: Connect uses a SIMULATED Google sign-in and made-up Fitbit data, so the flow can be shown
+              without a real watch. Real accounts use the real Google sign-in.
+            </p>
+          )}
         </div>
+        <div className="shrink-0 flex flex-col items-end gap-1.5">
         <span
           className="shrink-0 font-mono text-[10px] font-semibold px-2 py-1 rounded-full"
           style={{
@@ -119,6 +131,15 @@ export const GoogleHealthCard: React.FC<{ result?: string | null }> = ({ result 
         >
           {status == null ? '…' : connected ? 'CONNECTED' : 'NOT LINKED'}
         </span>
+        {simulated && (
+          <span
+            className="font-mono text-[10px] font-semibold px-2 py-1 rounded-full"
+            style={{ color: '#fff', backgroundColor: '#b3261e' }}
+          >
+            SIMULATED
+          </span>
+        )}
+        </div>
       </div>
 
       {flash && (
@@ -162,7 +183,10 @@ export const GoogleHealthCard: React.FC<{ result?: string | null }> = ({ result 
             style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--trunk)' }}
           >
             {busy === 'connect' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Watch className="w-4 h-4 text-branchOpen" />}
-            <span>{status?.needs_reconnect ? 'Reconnect Google Health' : 'Connect with Google Health'}</span>
+            <span>
+              {status?.needs_reconnect ? 'Reconnect Google Health' : 'Connect with Google Health'}
+              {simulated ? ' (simulated)' : ''}
+            </span>
             <ExternalLink className="w-3.5 h-3.5" />
           </button>
         </div>

@@ -246,6 +246,7 @@ export interface GoogleHealthSync {
 
 export interface GoogleHealthStatus {
   configured: boolean;
+  simulated: boolean; // true only for the Judge Demo account: simulated Google sign-in, made-up data
   connected: boolean;
   needs_reconnect: boolean;
   linked_at: string | null;
