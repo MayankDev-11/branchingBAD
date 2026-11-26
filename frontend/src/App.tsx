@@ -44,7 +44,16 @@ export const App: React.FC = () => {
   });
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [activeView, setActiveView] = useState<NavView>('dashboard');
+  // After Google's sign-in the backend redirects to /dashboard?connect=google&result=<code>:
+  // open Data & help, show the result once, and clean the address bar.
+  const [googleResult] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('connect') === 'google' ? params.get('result') ?? 'google_error' : null;
+  });
+  const [activeView, setActiveView] = useState<NavView>(googleResult ? 'connect' : 'dashboard');
+  useEffect(() => {
+    if (googleResult) window.history.replaceState(null, '', window.location.pathname);
+  }, [googleResult]);
   const [searchQuery, setSearchQuery] = useState('');
 
   const [graph, setGraph] = useState<GraphResponse | null>(null);
@@ -445,6 +454,7 @@ export const App: React.FC = () => {
               ) : activeView === 'connect' ? (
                 <div className="flex-1 min-w-0 h-full">
                   <ConnectDataView
+                    googleResult={googleResult}
                     totalRecords={totalRecords}
                     insights={insights}
                     isDataConnected={isDataConnected}

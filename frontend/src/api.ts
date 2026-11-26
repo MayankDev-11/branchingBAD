@@ -13,6 +13,8 @@ import type {
   CreateBranchInput,
   ExperimentInfo,
   GraphBranch,
+  GoogleHealthStatus,
+  GoogleHealthSync,
   GraphResponse,
   ImportSummary,
   InsightsResponse,
@@ -466,10 +468,49 @@ export const api = {
     return res.json();
   },
 
+  // Fitbit / Pixel Watch through the Google Health API (backend/integrations/connect.py)
+  async googleHealthStatus(): Promise<GoogleHealthStatus> {
+    const res = await fetch(`${API_BASE}/api/connect/google/status`, { credentials: 'include' });
+    if (!res.ok) throw new Error(`Google Health status failed (${res.status})`);
+    return res.json();
+  },
+
+  // Returns Google's sign-in page address; the caller sends the browser there.
+  async googleHealthStart(): Promise<string> {
+    const res = await fetch(`${API_BASE}/api/connect/google/start`, { credentials: 'include' });
+    if (!res.ok) throw new Error(await connectError(res));
+    return (await res.json()).url;
+  },
+
+  async googleHealthSync(): Promise<GoogleHealthSync> {
+    const res = await fetch(`${API_BASE}/api/connect/google/sync`, { method: 'POST', credentials: 'include' });
+    if (!res.ok) throw new Error(await connectError(res));
+    return res.json();
+  },
+
+  async googleHealthDisconnect(deleteData: boolean): Promise<void> {
+    const res = await fetch(`${API_BASE}/api/connect/google/disconnect`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delete_data: deleteData }),
+    });
+    if (!res.ok) throw new Error(`Disconnect failed (${res.status})`);
+  },
+
   getDefaultAskSample(): AskResponse {
     return sampleAsk as AskResponse;
   },
 };
+
+// The connect routes answer errors as {"detail": {"reason", "message"}}: show the message.
+async function connectError(res: Response): Promise<string> {
+  const body = await res.json().catch(() => null);
+  const detail = body?.detail;
+  if (detail && typeof detail === 'object' && typeof detail.message === 'string') return detail.message;
+  if (typeof detail === 'string') return detail;
+  return `Google Health request failed (${res.status})`;
+}
 
 const ttsAudioCache = new Map<string, string>();
 export async function synthesizeWithElevenLabs(text: string): Promise<string> {

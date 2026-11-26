@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.auth import auth_router, get_current_user, init_auth_db
 from backend.integrations.branches import router as workspace_router
+from backend.integrations.connect import router as google_health_router
 from backend.integrations.routes import router as integrations_router
 from backend.integrations.voice import router as voice_router
 from backend.routes import branches, experiments, insights
@@ -55,6 +56,9 @@ app.include_router(auth_router)
 app.include_router(workspace_router)
 app.include_router(integrations_router)
 app.include_router(voice_router)
+# Fitbit / Pixel Watch through the Google Health API. Each route checks sign-in itself
+# (the OAuth callback redirects to the dashboard instead of returning a 401 page).
+app.include_router(google_health_router)
 
 core_routes = APIRouter()
 for source, paths in (

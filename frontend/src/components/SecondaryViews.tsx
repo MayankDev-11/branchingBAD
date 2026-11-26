@@ -8,7 +8,6 @@ import {
   ChevronUp,
   Database,
   Download,
-  ExternalLink,
   FileUp,
   HelpCircle,
   Lock,
@@ -22,6 +21,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../auth/AuthContext';
+import { GoogleHealthCard, useGoogleHealthStatus } from './GoogleHealthCard';
 import type { ImportSummary, InsightsResponse, ThemeMode } from '../types';
 
 export const THEME_OPTIONS: Array<{
@@ -94,6 +94,7 @@ export const ProfileView: React.FC<{
     .slice(0, 2)
     .toUpperCase();
   const appleCount = sourceCount(insights, 'apple_health_export.xml', 'screen_time_export.csv');
+  const { status: google } = useGoogleHealthStatus();
   const manualCount = sourceCount(insights, 'manual_checkins.sqlite');
 
   return (
@@ -168,9 +169,13 @@ export const ProfileView: React.FC<{
           {
             icon: <Watch className="w-5 h-5 text-subCyan" />,
             name: 'Google Health / Fitbit',
-            status: 'Ready to link (OAuth)',
-            detail: 'Read-only web OAuth for Fitbit & Pixel Watch sensors',
-            connected: false,
+            status: google?.connected
+              ? `Connected · ${google.last_sync?.nights ?? 0} nights, ${google.last_sync?.step_days ?? 0} days of steps`
+              : google?.needs_reconnect
+              ? 'Sign-in expired · reconnect in Data & help'
+              : 'Not linked · connect in Data & help',
+            detail: 'Read-only Google sign-in for Fitbit & Pixel Watch sleep and steps',
+            connected: Boolean(google?.connected),
           },
           {
             icon: <CheckCircle2 className="w-5 h-5 text-ok" />,
@@ -277,12 +282,13 @@ export const ConnectDataView: React.FC<{
   insights: InsightsResponse | null;
   isDataConnected: boolean;
   onReloadDemo: () => void;
-}> = ({ totalRecords, insights, isDataConnected, onReloadDemo }) => {
+  // Result code from Google's sign-in redirect (?connect=google&result=...), shown once.
+  googleResult?: string | null;
+}> = ({ totalRecords, insights, isDataConnected, onReloadDemo, googleResult }) => {
   const [uploadState, setUploadState] = useState<'idle' | 'processing' | 'done' | 'error'>('idle');
   const [lastFile, setLastFile] = useState('');
   const [importResult, setImportResult] = useState<ImportSummary | null>(null);
   const [uploadError, setUploadError] = useState('');
-  const [googleNotice, setGoogleNotice] = useState(false);
 
   // Runs the real Apple Health importer on the server (POST /api/import/apple-health).
   // It writes to its own database, so the demo graph and its numbers stay as they are.
@@ -562,42 +568,7 @@ export const ConnectDataView: React.FC<{
           )}
         </div>
 
-        <div
-          className="rounded-2xl p-5 flex flex-col justify-between gap-4"
-          style={{ backgroundColor: 'var(--s1)', border: '1px solid var(--border)' }}
-        >
-          <div className="space-y-3">
-            <h2 className="text-[14.5px] font-semibold text-t1">Connect Wearable Account (OAuth)</h2>
-            <p className="text-[12.5px] text-t2 leading-relaxed">
-              Link Fitbit or Pixel Watch via the Google Health API using read-only web OAuth. Tokens
-              are stored encrypted and can be revoked anytime with one click.
-            </p>
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={() => setGoogleNotice(true)}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12.5px] font-semibold text-t1"
-                style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--trunk)' }}
-              >
-                <Watch className="w-4 h-4 text-branchOpen" />
-                <span>Connect with Google Health</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            {googleNotice && (
-              <p className="font-mono text-[11px] text-amb">
-                Google Health OAuth is scheduled for Hack Day (Ring 3). Demo &amp; file uploads are live now.
-              </p>
-            )}
-          </div>
-
-          <div
-            className="rounded-xl p-3.5 font-mono text-[10.5px] text-t3"
-            style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
-          >
-            Top-right status pill turns <strong className="text-ok">Connected</strong> automatically whenever ≥ 1 health source is active.
-          </div>
-        </div>
+        <GoogleHealthCard result={googleResult} />
       </div>
 
       {/* 3. HELP CENTER: STEP-BY-STEP EXPORT GUIDES */}
