@@ -71,6 +71,8 @@ export const App: React.FC = () => {
 
   const [demoDaysAdvanced, setDemoDaysAdvanced] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // An Ask failure keeps its question, so the banner's Retry re-asks it (not a page reload).
+  const [askError, setAskError] = useState<{ message: string; question: string } | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -165,12 +167,14 @@ export const App: React.FC = () => {
     setIsAsking(true);
     setAskResult(null);
     setErrorMsg(null);
+    setAskError(null);
     setAskQuestion(question);
     try {
       const res = await api.ask(selectedBranchId, question);
       setAskResult(res);
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Ask request failed');
+      // The backend already retried Gemini 3 times; this banner's Retry asks the same question again.
+      setAskError({ message: err instanceof Error ? err.message : 'Ask request failed', question });
     } finally {
       setIsAsking(false);
     }
@@ -296,6 +300,32 @@ export const App: React.FC = () => {
           onAskSubmit={handleAskSubmit}
           onOpenConnect={() => setActiveView('connect')}
         />
+
+        {askError && !isAsking && (
+          <div
+            role="alert"
+            className="px-5 py-2 flex items-center justify-between gap-4 text-[12px] font-mono"
+            style={{
+              backgroundColor: 'rgba(255, 77, 109, 0.14)',
+              borderBottom: '1px solid rgba(255, 77, 109, 0.35)',
+              color: 'var(--change)',
+            }}
+          >
+            <span>{askError.message}</span>
+            <span className="flex items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleAskSubmit(askError.question)}
+                className="underline font-semibold"
+              >
+                Retry question
+              </button>
+              <button type="button" onClick={() => setAskError(null)} className="opacity-70 hover:opacity-100">
+                Dismiss
+              </button>
+            </span>
+          </div>
+        )}
 
         {errorMsg && (
           <div
