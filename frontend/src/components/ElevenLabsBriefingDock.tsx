@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pause, Play, ShieldCheck, SkipForward, Volume2, X } from 'lucide-react';
 import { synthesizeWithElevenLabs } from '../api';
+import { toBcp47VoiceLang, useVoicePreferences, VoiceControl } from './VoiceControl';
 
 export interface BriefingBeat {
   id: string;
@@ -27,11 +28,29 @@ export const ElevenLabsBriefingDock: React.FC<ElevenLabsBriefingDockProps> = ({
   const [beatIdx, setBeatIdx] = useState(0);
   const [engineLabel, setEngineLabel] = useState<'ElevenLabs TTS' | 'Local Voice Fallback'>('ElevenLabs TTS');
 
+  const {
+    voiceKey,
+    languageCode,
+    presets,
+    languages,
+    totalLanguages,
+    currentPreset,
+    setVoiceKey,
+    setLanguageCode,
+  } = useVoicePreferences();
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playingRef = useRef(false);
+  const requestIdRef = useRef(0);
+  const prefsRef = useRef({ voiceKey, languageCode });
+  prefsRef.current = { voiceKey, languageCode };
+  const prevPrefsRef = useRef({ voiceKey, languageCode });
+  const beatIdxRef = useRef(beatIdx);
+  beatIdxRef.current = beatIdx;
 
-  const stopPlayback = () => {
+  const stopPlayback = useCallback(() => {
     playingRef.current = false;
+    requestIdRef.current += 1;
     setIsPlaying(false);
     if (audioRef.current) {
       audioRef.current.pause();
@@ -41,19 +60,27 @@ export const ElevenLabsBriefingDock: React.FC<ElevenLabsBriefingDockProps> = ({
       window.speechSynthesis.cancel();
     }
     onHighlightNodes([]);
-  };
+  }, [onHighlightNodes]);
 
   useEffect(() => {
     return () => stopPlayback();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [stopPlayback]);
 
-  const playBeatAt = async (index: number) => {
+  const playBeatAt = useCallback(async (index: number) => {
     if (index >= beats.length) {
       stopPlayback();
       return;
     }
     const beat = beats[index];
+    const reqId = ++requestIdRef.current;
+    const { voiceKey: activeVoice, languageCode: activeLang } = prefsRef.current;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
     setBeatIdx(index);
     onHighlightNodes(beat.highlightNodes);
     playingRef.current = true;
@@ -61,35 +88,50 @@ export const ElevenLabsBriefingDock: React.FC<ElevenLabsBriefingDockProps> = ({
 
     // 1. Try real ElevenLabs TTS (cached in memory so replays spend 0 credits!)
     try {
-      const audioUrl = await synthesizeWithElevenLabs(beat.text);
-      if (!playingRef.current) return;
+      const audioUrl = await synthesizeWithElevenLabs(beat.text, {
+        voiceKey: activeVoice,
+        languageCode: activeLang,
+        translate: activeLang !== 'en',
+      });
+      if (!playingRef.current || requestIdRef.current !== reqId) return;
       setEngineLabel('ElevenLabs TTS');
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
       audio.onended = () => {
-        if (playingRef.current) playBeatAt(index + 1);
+        if (playingRef.current && requestIdRef.current === reqId) playBeatAt(index + 1);
       };
       await audio.play();
       return;
     } catch {
       // 2. Seamless browser speech fallback when no API key is pasted yet
-      if (!playingRef.current) return;
+      if (!playingRef.current || requestIdRef.current !== reqId) return;
       setEngineLabel('Local Voice Fallback');
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(beat.text);
+        utter.lang = toBcp47VoiceLang(activeLang);
         utter.rate = 1.03;
         utter.onend = () => {
-          if (playingRef.current) playBeatAt(index + 1);
+          if (playingRef.current && requestIdRef.current === reqId) playBeatAt(index + 1);
         };
         window.speechSynthesis.speak(utter);
       } else {
         setTimeout(() => {
-          if (playingRef.current) playBeatAt(index + 1);
+          if (playingRef.current && requestIdRef.current === reqId) playBeatAt(index + 1);
         }, 4200);
       }
     }
-  };
+  }, [beats, onHighlightNodes, stopPlayback]);
+
+  useEffect(() => {
+    const prev = prevPrefsRef.current;
+    if (prev.voiceKey !== voiceKey || prev.languageCode !== languageCode) {
+      prevPrefsRef.current = { voiceKey, languageCode };
+      if (playingRef.current) {
+        void playBeatAt(beatIdxRef.current);
+      }
+    }
+  }, [voiceKey, languageCode, playBeatAt]);
 
   const handleTogglePlay = () => {
     setExpanded(true);
@@ -123,7 +165,7 @@ export const ElevenLabsBriefingDock: React.FC<ElevenLabsBriefingDockProps> = ({
         </span>
         <span className="text-t1">Play Guided Audio Brief</span>
         <span className="font-mono text-[9.5px] px-1.5 py-0.5 rounded bg-s2 text-branchOpen">
-          ElevenLabs
+          {currentPreset.label} · {languageCode.toUpperCase()}
         </span>
       </button>
     );
@@ -178,6 +220,16 @@ export const ElevenLabsBriefingDock: React.FC<ElevenLabsBriefingDockProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          <VoiceControl
+            mode="picker"
+            voiceKey={voiceKey}
+            languageCode={languageCode}
+            presets={presets}
+            languages={languages}
+            totalLanguages={totalLanguages}
+            onChangeVoice={setVoiceKey}
+            onChangeLanguage={setLanguageCode}
+          />
           <button
             type="button"
             onClick={() => playBeatAt((beatIdx + 1) % beats.length)}

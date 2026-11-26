@@ -343,13 +343,14 @@ export const LandingPage: React.FC = () => {
               </div>
 
               <div
-                className="pt-5 border-t grid grid-cols-3 gap-4"
+                className="pt-5 border-t grid grid-cols-2 gap-x-6 gap-y-4"
                 style={{ borderColor: 'var(--rl-border-hairline)' }}
               >
                 {[
                   { val: 'SQLite', label: 'Local structured store' },
                   { val: 'PELT + MAD', label: 'Deterministic stats' },
                   { val: 'Read-Only', label: 'AI write boundary' },
+                  { val: '90+ Languages', label: 'ElevenLabs Scribe v3 · v4 Turbo (EN · हिन्दी · ಕನ್ನಡ)' },
                 ].map((stat) => (
                   <div key={stat.label}>
                     <div className="rl-mono text-[12.5px] font-semibold" style={{ color: 'var(--rl-ink-primary)' }}>
@@ -614,6 +615,11 @@ export const LandingPage: React.FC = () => {
                       dim: 'AI Boundaries',
                       generic: 'Chatbots reading raw uploads with free-form answers and no citation checks.',
                       roottrace: 'Strictly read-only collaborator; PII scrubbed first and every claim verified against record IDs.',
+                    },
+                    {
+                      dim: 'Multilingual Voice',
+                      generic: 'English-only dictation or unredacted audio transcripts stored in the cloud.',
+                      roottrace: 'ElevenLabs Scribe v3 & v4 Turbo across 90+ languages (English, हिन्दी, ಕನ್ನಡ) with local PII scrubbing before synthesis.',
                     },
                   ].map((row) => (
                     <tr key={row.dim} style={{ borderColor: 'var(--rl-border-hairline)' }}>

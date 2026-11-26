@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { api } from '../../api';
+import { toBcp47VoiceLang } from '../VoiceControl';
 import type { CreateBranchInput } from '../../types';
 
 interface NewBranchModalProps {
@@ -31,6 +32,15 @@ const METRIC_OPTIONS = [
   ['caffeine', 'Late caffeine'],
 ] as const;
 
+const VOICE_INPUT_LANGUAGES = [
+  { id: 'auto', label: 'Auto (90+)' },
+  { id: 'en', label: 'EN' },
+  { id: 'hi', label: 'हिन्दी' },
+  { id: 'kn', label: 'ಕನ್ನಡ' },
+] as const;
+
+type VoiceInputLang = (typeof VOICE_INPUT_LANGUAGES)[number]['id'];
+
 const VOICE_PRESETS = [
   {
     label: 'Afternoon crash (3 PM)',
@@ -40,6 +50,7 @@ const VOICE_PRESETS = [
       title: 'Why do I crash at 3 PM every afternoon?',
       branch_type: 'investigation' as const,
       metrics: ['sleep_min', 'steps'],
+      outcome: 'afternoon_energy' as NonNullable<CreateBranchInput['outcome']>,
       hypotheses: [],
     },
   },
@@ -51,18 +62,21 @@ const VOICE_PRESETS = [
       title: 'Walk 25 min every morning before 9 AM',
       branch_type: 'habit' as const,
       metrics: ['steps', 'sleep_min'],
+      outcome: 'auto' as NonNullable<CreateBranchInput['outcome']>,
       hypotheses: [],
     },
   },
 ];
 
-function extractStructuredFromTranscript(transcript: string): {
+function extractStructuredFromTranscript(transcript: string, englishSource?: string): {
   title: string;
   branch_type: 'investigation' | 'habit';
   metrics: string[];
+  outcome: NonNullable<CreateBranchInput['outcome']>;
   hypotheses: string[];
 } {
-  const lower = transcript.toLowerCase();
+  const analysisText = (englishSource || transcript).trim();
+  const lower = analysisText.toLowerCase();
   const isHabit =
     lower.includes('habit') ||
     lower.includes('start walking') ||
@@ -73,21 +87,29 @@ function extractStructuredFromTranscript(transcript: string): {
   if (lower.includes('sleep') || lower.includes('tired') || lower.includes('crash')) metrics.push('sleep_min');
   if (lower.includes('water') || lower.includes('hydrat')) metrics.push('water_ml');
   if (lower.includes('walk') || lower.includes('step') || lower.includes('gym')) metrics.push('steps');
-  if (lower.includes('headache')) metrics.push('headache');
+  if (lower.includes('headache') || lower.includes('migraine')) metrics.push('headache');
   if (lower.includes('screen') || lower.includes('phone')) metrics.push('late_screen_min');
   if (lower.includes('coffee') || lower.includes('caffeine') || lower.includes('chai')) metrics.push('caffeine');
 
-  const cleanedTitle = transcript
+  let outcome: NonNullable<CreateBranchInput['outcome']> = 'auto';
+  if (lower.includes('headache') || lower.includes('migraine')) outcome = 'headache';
+  else if (lower.includes('crash') || lower.includes('afternoon') || lower.includes('slump') || lower.includes('fatigue') || lower.includes('tired')) {
+    outcome = 'afternoon_energy';
+  } else if (lower.includes('sleep') || lower.includes('insomnia')) {
+    outcome = 'sleep_min';
+  }
+
+  const cleanedTitle = analysisText
     .replace(/^(create|start|log|add)\s+(a\s+)?(new\s+)?(branch|habit|investigation)\s*(for|to|about)?\s*/i, '')
     .trim();
   const shortTitle =
     cleanedTitle.length > 58 ? `${cleanedTitle.slice(0, 56).trim()}…` : cleanedTitle || 'New health investigation';
 
-
   return {
     title: shortTitle,
     branch_type: isHabit ? 'habit' : 'investigation',
     metrics,
+    outcome,
     hypotheses: [],
   };
 }
@@ -110,7 +132,10 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
 
   // Voice + ElevenLabs state
   const [voicePhase, setVoicePhase] = useState<'idle' | 'requesting' | 'recording' | 'transcribing'>('idle');
+  const [voiceInputLang, setVoiceInputLang] = useState<VoiceInputLang>('auto');
   const [transcript, setTranscript] = useState('');
+  const [englishTranscript, setEnglishTranscript] = useState('');
+  const [detectedLanguage, setDetectedLanguage] = useState('');
   const [voiceStatus, setVoiceStatus] = useState('');
   const isRecording = voicePhase === 'recording';
   const voiceBusy = voicePhase !== 'idle';
@@ -160,19 +185,21 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
     title: string;
     branch_type: 'investigation' | 'habit';
     metrics: string[];
+    outcome?: NonNullable<CreateBranchInput['outcome']>;
     hypotheses: string[];
   }) => {
     setTitle(parsed.title);
     setBranchType(parsed.branch_type);
     setSelectedMetrics(parsed.metrics);
     setHypInput(parsed.hypotheses.join(', '));
-    setOutcome('auto');
+    setOutcome(parsed.outcome ?? 'auto');
   };
 
-  const speakConfirmation = (text: string) => {
+  const speakConfirmation = (text: string, langCode = 'en') => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = toBcp47VoiceLang(langCode);
       utter.rate = 1.04;
       window.speechSynthesis.speak(utter);
     }
@@ -186,6 +213,8 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
     }
     const version = ++captureVersion.current;
     setTranscript('');
+    setEnglishTranscript('');
+    setDetectedLanguage('');
     setVoicePhase('requesting');
     setVoiceStatus('Allow microphone access if your browser asks.');
 
@@ -224,14 +253,26 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
             return;
           }
           setVoicePhase('transcribing');
-          setVoiceStatus('Transcribing with ElevenLabs…');
-          const text = await api.transcribeVoiceWithElevenLabs(blob);
+          setVoiceStatus('Transcribing with ElevenLabs Scribe v3…');
+          const result = await api.transcribeVoiceWithElevenLabs(
+            blob,
+            voiceInputLang === 'auto' ? undefined : voiceInputLang
+          );
           if (captureVersion.current !== version) return;
-          setTranscript(text);
-          const parsed = extractStructuredFromTranscript(text);
+          const nativeText = result.text;
+          const resolvedLang = result.language_code || (voiceInputLang === 'auto' ? 'en' : voiceInputLang);
+          const englishDraft = result.english_text || nativeText;
+          setTranscript(nativeText);
+          setDetectedLanguage(resolvedLang);
+          setEnglishTranscript(englishDraft !== nativeText ? englishDraft : '');
+          const parsed = extractStructuredFromTranscript(nativeText, englishDraft);
           applyParsedDraft(parsed);
-          setVoiceStatus('Transcribed via ElevenLabs Scribe · Review & approve branch below');
-          speakConfirmation(`Drafted ${parsed.branch_type} branch: ${parsed.title}`);
+          setVoiceStatus(
+            resolvedLang !== 'en'
+              ? `Transcribed via ElevenLabs Scribe v3 (${resolvedLang.toUpperCase()}) · Review & approve branch below`
+              : 'Transcribed via ElevenLabs Scribe v3 · Review & approve branch below'
+          );
+          speakConfirmation(`Drafted ${parsed.branch_type} branch: ${parsed.title}`, 'en');
         } catch (error) {
           if (captureVersion.current === version) {
             setVoiceStatus(error instanceof Error ? error.message : 'Transcription failed. Try again or type the branch.');
@@ -269,6 +310,8 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
 
   const runVoicePreset = (preset: (typeof VOICE_PRESETS)[number]) => {
     setTranscript(preset.transcript);
+    setEnglishTranscript('');
+    setDetectedLanguage('en');
     applyParsedDraft(preset.parsed);
     setVoiceStatus('Sample voice draft ready · Review before creating the branch');
     speakConfirmation(`Drafted ${preset.parsed.branch_type} branch: ${preset.parsed.title}`);
@@ -299,6 +342,8 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
       setHypInput('');
       setOutcome('auto');
       setTranscript('');
+      setEnglishTranscript('');
+      setDetectedLanguage('');
       onClose();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Could not create branch.');
@@ -373,14 +418,40 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
             className="mt-4 rounded-xl p-4 space-y-3.5"
             style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border-strong)' }}
           >
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="inline-flex items-center gap-1.5 font-mono text-[10px] font-semibold text-branchOpen">
                 <Volume2 className="w-3.5 h-3.5" />
                 ELEVENLABS VOICE BRANCH CAPTURE
               </span>
+              <div
+                role="group"
+                aria-label="Spoken input language"
+                className="inline-flex items-center p-0.5 rounded-full gap-0.5"
+                style={{ backgroundColor: 'var(--s1)', border: '1px solid var(--border)' }}
+              >
+                {VOICE_INPUT_LANGUAGES.map((opt) => {
+                  const active = voiceInputLang === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setVoiceInputLang(opt.id)}
+                      disabled={voiceBusy}
+                      aria-pressed={active}
+                      className="px-2 py-0.5 rounded-full font-mono text-[9.5px] font-semibold transition-colors disabled:opacity-50"
+                      style={{
+                        backgroundColor: active ? 'var(--trunk)' : 'transparent',
+                        color: active ? 'var(--btn-ink)' : 'var(--t2)',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <p className="text-[11px] text-t3">
-              Recording sends your clip to ElevenLabs for transcription. Use a demo sample or type to keep the input local.
+              Recording uses ElevenLabs Scribe v3 across 90+ languages (Auto-detect, EN, हिन्दी, ಕನ್ನಡ). Use a demo sample or type to keep the input local.
             </p>
 
             {/* Big Interactive Mic Button + Live Waveform */}
@@ -424,11 +495,29 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
 
             {transcript && (
               <div
-                className="rounded-lg p-3 font-mono text-[11px] text-t2"
+                className="rounded-lg p-3 font-mono text-[11px] text-t2 space-y-1.5"
                 style={{ backgroundColor: 'var(--s1)', border: '1px solid var(--border)' }}
               >
-                <div className="text-[9px] uppercase text-t3 mb-1">Captured Transcript</div>
-                “{transcript}”
+                <div className="flex items-center justify-between gap-2 text-[9px] uppercase text-t3">
+                  <span>
+                    Captured Transcript{detectedLanguage ? ` · ${detectedLanguage.toUpperCase()}` : ''}
+                  </span>
+                  {englishTranscript && (
+                    <button
+                      type="button"
+                      onClick={() => setTitle(transcript.slice(0, 120))}
+                      className="font-mono text-[9.5px] text-branchOpen hover:underline normal-case"
+                    >
+                      Use native wording as title
+                    </button>
+                  )}
+                </div>
+                <div className="text-t1">“{transcript}”</div>
+                {englishTranscript && (
+                  <div className="text-[10.5px] text-t3 pt-1 border-t" style={{ borderColor: 'var(--border)' }}>
+                    English match: “{englishTranscript}”
+                  </div>
+                )}
               </div>
             )}
 
