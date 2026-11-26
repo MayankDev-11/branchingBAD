@@ -174,6 +174,8 @@ All `/api/*` data routes need the sign-in cookie. Exact response shapes are in [
 
 The old Fitbit Web API was switched off on 2 Nov 2026. Fitbit and Pixel Watch data now comes from the **Google Health API**, with a Google sign-in. RootTrace reads the last 90 days of **sleep** and **daily steps** (read-only), saves them as records in the signed-in account's own database (`backend/data/google_health_<account>.db`, never the demo data), and runs change detection on them. Sign-in tokens are stored encrypted and **Disconnect** revokes them.
 
+**Judge Demo needs no setup.** The demo account has no real watch, so its **Connect** goes to a **simulated** sign-in page (labelled SIMULATED, served by our own backend) and imports 90 days of made-up Fitbit sleep and steps that follow the demo story. The real download, import and change-detection code runs on that data. Every other account always uses the real Google sign-in below.
+
 **One-time Google setup (about 10 minutes, needs a Google account):**
 
 1. Open [Google Cloud console](https://console.cloud.google.com), create a project (for example "RootTrace Dev").
