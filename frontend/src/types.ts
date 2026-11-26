@@ -273,3 +273,39 @@ export interface AskResponse {
   dropped_claims: number;
   sent_to_ai: string;
 }
+
+export type VoicePresetKey = 'sarah' | 'laura' | 'george' | 'charlie';
+export type VoiceLanguageCode = 'en' | 'hi' | 'kn';
+
+export interface VoicePreset {
+  key: VoicePresetKey;
+  label: string;
+  gender: 'female' | 'male';
+  style: string;
+}
+
+export interface VoiceLanguageOption {
+  code: VoiceLanguageCode;
+  label: string;
+  native_label: string;
+}
+
+export interface VoicePresetsResponse {
+  presets: VoicePreset[];
+  languages: VoiceLanguageOption[];
+  total_languages: string;
+  default_voice: VoicePresetKey;
+  default_language: VoiceLanguageCode;
+}
+
+export interface TranscribeVoiceResult {
+  text: string;
+  language_code: string;
+  english_text: string;
+}
+
+export interface SynthesizeVoiceOptions {
+  voiceKey?: VoicePresetKey;
+  languageCode?: VoiceLanguageCode;
+  translate?: boolean;
+}

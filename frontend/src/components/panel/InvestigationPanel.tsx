@@ -10,11 +10,11 @@ import {
   Lock,
   ShieldAlert,
   Sparkles,
-  Volume2,
   X,
 } from 'lucide-react';
 import { api, synthesizeWithElevenLabs } from '../../api';
 import { readAskAudit } from '../../askAudit';
+import { VoiceControl, useVoicePreferences } from '../VoiceControl';
 import type { AskResponse, BranchAction, BranchDetailResponse, BranchDraftContext, BranchHypothesis } from '../../types';
 
 interface InvestigationPanelProps {
@@ -207,6 +207,15 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   const [audioMessage, setAudioMessage] = useState('');
   const branchAudio = useRef<HTMLAudioElement | null>(null);
   const playbackRequest = useRef(0);
+  const {
+    voiceKey,
+    languageCode,
+    presets,
+    languages,
+    totalLanguages,
+    setVoiceKey,
+    setLanguageCode,
+  } = useVoicePreferences();
   const [action, setAction] = useState<BranchAction | null>(null);
   const [resolutionNote, setResolutionNote] = useState('');
   const [actionError, setActionError] = useState('');
@@ -240,10 +249,16 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
 
   useEffect(() => {
     const player = branchAudio.current;
+    playbackRequest.current += 1;
     setSpeakingSummary(false);
     setLoadingAudio(false);
     setAudioReady(false);
     setAudioMessage('');
+    if (player) {
+      player.pause();
+      player.removeAttribute('src');
+      player.load();
+    }
     return () => {
       playbackRequest.current += 1;
       if (player) {
@@ -252,7 +267,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
         player.load();
       }
     };
-  }, [branch, askResult]);
+  }, [branch, askResult, voiceKey, languageCode]);
 
   // 1. RED FLAG SAFETY SCREEN (blocks AI output completely)
   if (askResult?.red_flag) {
@@ -443,7 +458,11 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
         : `Investigation: ${branch.title}. Not enough data yet.`;
       setLoadingAudio(true);
       try {
-        const url = await synthesizeWithElevenLabs(spoken);
+        const url = await synthesizeWithElevenLabs(spoken, {
+          voiceKey,
+          languageCode,
+          translate: languageCode !== 'en',
+        });
         if (playbackRequest.current !== request) return;
         player.src = url;
         setAudioReady(true);
@@ -465,6 +484,17 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           ? 'Audio is ready. Press Play in the player to listen.'
           : 'The browser could not play this audio.');
       }
+    }
+  };
+
+  const handleStopBranch = () => {
+    const player = branchAudio.current;
+    playbackRequest.current += 1;
+    setLoadingAudio(false);
+    setSpeakingSummary(false);
+    if (player) {
+      player.pause();
+      player.currentTime = 0;
     }
   };
 
@@ -673,30 +703,29 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
         )}
 
         {!guidance && <div className="space-y-2.5">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-mono text-[9.5px] uppercase tracking-wider text-t3">
               {branch.hypotheses.length} Competing Hypotheses
             </span>
-            <div className="flex items-center gap-2.5">
-              <button
-                type="button"
-                onClick={handleSpeakBranch}
-                disabled={loadingAudio}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-mono text-[9.5px] font-semibold transition-colors"
-                style={{
-                  backgroundColor: speakingSummary ? 'var(--trunk)' : 'var(--s2)',
-                  color: speakingSummary ? 'var(--btn-ink)' : 'var(--branch-open)',
-                  border: '1px solid var(--border-strong)',
-                }}
-              >
-                <Volume2 className="w-3 h-3" />
-                <span>{loadingAudio ? 'Generating audio…' : speakingSummary ? 'Pause narration' : 'Listen with ElevenLabs'}</span>
-              </button>
+            <div className="flex items-center gap-2">
+              <VoiceControl
+                isPlaying={speakingSummary}
+                isLoading={loadingAudio}
+                onPlayToggle={handleSpeakBranch}
+                onStop={handleStopBranch}
+                voiceKey={voiceKey}
+                languageCode={languageCode}
+                presets={presets}
+                languages={languages}
+                totalLanguages={totalLanguages}
+                onChangeVoice={setVoiceKey}
+                onChangeLanguage={setLanguageCode}
+              />
               <button
                 type="button"
                 disabled={!firstCitedId}
                 onClick={() => firstCitedId && onOpenRecord(firstCitedId, 'ai')}
-                className="font-mono text-[10px] font-semibold text-branchOpen hover:underline disabled:opacity-40"
+                className="font-mono text-[10px] font-semibold text-branchOpen hover:underline disabled:opacity-40 whitespace-nowrap"
               >
                 What AI saw →
               </button>

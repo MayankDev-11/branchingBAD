@@ -19,6 +19,9 @@ import type {
   ImportSummary,
   InsightsResponse,
   RecordDetailResponse,
+  SynthesizeVoiceOptions,
+  TranscribeVoiceResult,
+  VoicePresetsResponse,
   WorkspaceHistoryEntry,
 } from './types';
 
@@ -347,17 +350,51 @@ export const api = {
     return res.json();
   },
 
-  async transcribeVoiceWithElevenLabs(audioBlob: Blob): Promise<string> {
+  async getVoicePresets(): Promise<VoicePresetsResponse> {
+    if (USE_MOCK) {
+      return {
+        presets: [
+          { key: 'sarah', label: 'Sarah', gender: 'female', style: 'Soft narrator' },
+          { key: 'laura', label: 'Laura', gender: 'female', style: 'Warm & upbeat' },
+          { key: 'george', label: 'George', gender: 'male', style: 'Articulate anchor' },
+          { key: 'charlie', label: 'Charlie', gender: 'male', style: 'Friendly baritone' },
+        ],
+        languages: [
+          { code: 'en', label: 'English', native_label: 'English' },
+          { code: 'hi', label: 'Hindi', native_label: 'हिन्दी' },
+          { code: 'kn', label: 'Kannada', native_label: 'ಕನ್ನಡ' },
+        ],
+        total_languages: '90+',
+        default_voice: 'sarah',
+        default_language: 'en',
+      };
+    }
+    const res = await fetch(`${API_BASE}/api/voice/presets`, { credentials: 'include' });
+    if (!res.ok) {
+      throw new Error(await errorDetail(res, 'Could not load voice presets.'));
+    }
+    return res.json();
+  },
+
+  async transcribeVoiceWithElevenLabs(audioBlob: Blob, languageCode?: string): Promise<TranscribeVoiceResult> {
     const form = new FormData();
     form.append('audio', audioBlob, 'check-in');
+    if (languageCode && languageCode !== 'auto') {
+      form.append('language_code', languageCode);
+    }
     const res = await fetch(`${API_BASE}/api/voice/transcribe`, {
       method: 'POST', credentials: 'include', body: form,
     });
     if (!res.ok) {
       throw new Error(await errorDetail(res, 'ElevenLabs transcription failed.'));
     }
-    const { transcript } = await res.json();
-    return transcript;
+    const data = await res.json();
+    const text: string = data.text ?? data.transcript ?? '';
+    return {
+      text,
+      language_code: data.language_code ?? 'en',
+      english_text: data.english_text ?? text,
+    };
   },
 
   async getRecord(id: string): Promise<RecordDetailResponse> {
@@ -513,20 +550,32 @@ async function connectError(res: Response): Promise<string> {
 }
 
 const ttsAudioCache = new Map<string, string>();
-export async function synthesizeWithElevenLabs(text: string): Promise<string> {
-  const cached = ttsAudioCache.get(text);
+export async function synthesizeWithElevenLabs(
+  text: string,
+  options: SynthesizeVoiceOptions = {}
+): Promise<string> {
+  const voiceKey = options.voiceKey ?? 'sarah';
+  const languageCode = options.languageCode ?? 'en';
+  const translate = options.translate ?? languageCode !== 'en';
+  const cacheKey = JSON.stringify([text, voiceKey, languageCode, translate]);
+  const cached = ttsAudioCache.get(cacheKey);
   if (cached) return cached;
 
   const res = await fetch(`${API_BASE}/api/voice/synthesize`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({
+      text,
+      voice_key: voiceKey,
+      language_code: languageCode,
+      translate,
+    }),
   });
   if (!res.ok) {
     throw new Error(await errorDetail(res, 'ElevenLabs narration unavailable.'));
   }
   const url = URL.createObjectURL(await res.blob());
-  ttsAudioCache.set(text, url);
+  ttsAudioCache.set(cacheKey, url);
   return url;
 }
