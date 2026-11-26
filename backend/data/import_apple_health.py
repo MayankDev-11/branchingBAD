@@ -19,6 +19,7 @@ Never commit a real export or the database it produces (rule 8): *.db and export
 
 import argparse
 import hashlib
+import math
 import re
 import sqlite3
 import zipfile
@@ -35,6 +36,7 @@ from backend.data.metrics import METRICS
 
 IST = timezone(timedelta(hours=5, minutes=30))
 BATCH = 5000
+MAX_UNCOMPRESSED_XML_BYTES = 2 * 1024**3
 
 STEPS = "HKQuantityTypeIdentifierStepCount"
 WATER = "HKQuantityTypeIdentifierDietaryWater"
@@ -139,6 +141,22 @@ class ImportSummary:
     last_date: str | None = None
 
 
+class _LimitedStream:
+    """Guard against zip bombs by bounding total decompressed bytes read from export.xml."""
+
+    def __init__(self, stream, limit: int):
+        self._stream = stream
+        self._limit = limit
+        self._read_bytes = 0
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._stream.read(size)
+        self._read_bytes += len(chunk)
+        if self._read_bytes > self._limit:
+            raise ValueError("Uncompressed export.xml exceeds size limit")
+        return chunk
+
+
 @contextmanager
 def open_export(path: Path):
     """Yield a binary stream of export.xml, from the XML itself or from Apple's export.zip."""
@@ -147,8 +165,11 @@ def open_export(path: Path):
             members = [n for n in zf.namelist() if n.rsplit("/", 1)[-1] == "export.xml"]
             if not members:
                 raise ValueError(f"{path.name} has no export.xml inside")
-            with zf.open(members[0]) as fh:
-                yield fh
+            info = zf.getinfo(members[0])
+            if info.file_size > MAX_UNCOMPRESSED_XML_BYTES:
+                raise ValueError("Uncompressed export.xml exceeds size limit")
+            with zf.open(info) as fh:
+                yield _LimitedStream(fh, MAX_UNCOMPRESSED_XML_BYTES)
     else:
         with open(path, "rb") as fh:
             yield fh
@@ -192,6 +213,8 @@ class Collector:
             try:
                 amount = float(value)
             except ValueError:
+                return False
+            if not math.isfinite(amount):
                 return False
             if rtype == WATER:
                 if unit not in WATER_TO_ML:

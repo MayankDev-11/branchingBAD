@@ -67,14 +67,22 @@ export const InsightsView: React.FC<InsightsViewProps> = ({ insights, graph, onO
   const padT = 22;
   const padB = 30;
   const sleepVals = days.map((d) => d.sleep as number);
-  const minSleep = Math.floor((Math.min(...sleepVals, shift?.normal_low_min ?? Infinity) - 20) / 60) * 60;
-  const maxSleep = Math.ceil((Math.max(...sleepVals, shift?.normal_high_min ?? -Infinity) + 20) / 60) * 60;
+  const rawMinSleep = sleepVals.length
+    ? Math.min(...sleepVals, shift?.normal_low_min ?? Infinity)
+    : 300;
+  const rawMaxSleep = sleepVals.length
+    ? Math.max(...sleepVals, shift?.normal_high_min ?? -Infinity)
+    : 540;
+  const minSleep = Math.floor((rawMinSleep - 20) / 60) * 60;
+  const maxSleep = Math.max(minSleep + 60, Math.ceil((rawMaxSleep + 20) / 60) * 60);
   const sx = (i: number) => padL + (i / Math.max(1, days.length - 1)) * (W - padL - padR);
-  const sy = (val: number) => padT + ((maxSleep - val) / (maxSleep - minSleep)) * (H - padT - padB);
+  const sy = (val: number) => padT + ((maxSleep - val) / Math.max(1, maxSleep - minSleep)) * (H - padT - padB);
   const linePath = days
     .map((p, i) => `${i === 0 ? 'M' : 'L'} ${sx(i).toFixed(1)} ${sy(p.sleep as number).toFixed(1)}`)
     .join(' ');
-  const areaPath = `${linePath} L ${sx(days.length - 1).toFixed(1)} ${H - padB} L ${sx(0).toFixed(1)} ${H - padB} Z`;
+  const areaPath = days.length
+    ? `${linePath} L ${sx(days.length - 1).toFixed(1)} ${H - padB} L ${sx(0).toFixed(1)} ${H - padB} Z`
+    : '';
   const gridLines: number[] = [];
   for (let m = minSleep; m <= maxSleep; m += 60) gridLines.push(m);
   const labelEvery = Math.max(1, Math.round(days.length / 7));
@@ -82,13 +90,15 @@ export const InsightsView: React.FC<InsightsViewProps> = ({ insights, graph, onO
   // ---- Chart B: sleep vs water scatter ----
   const scatterDays = days.filter((d) => d.water !== null);
   const waterVals = scatterDays.map((d) => d.water as number);
-  const wMin = Math.floor(Math.min(...waterVals, lowWater?.threshold ?? Infinity) / 250) * 250;
-  const wMax = Math.ceil(Math.max(...waterVals) / 250) * 250;
+  const rawWMin = waterVals.length ? Math.min(...waterVals, lowWater?.threshold ?? Infinity) : 0;
+  const rawWMax = waterVals.length ? Math.max(...waterVals) : 3000;
+  const wMin = Math.floor(rawWMin / 250) * 250;
+  const wMax = Math.max(wMin + 250, Math.ceil(rawWMax / 250) * 250);
   const SX0 = 44;
   const SX1 = 358;
   const SY0 = 20;
   const SY1 = 192;
-  const px = (sleep: number) => SX0 + ((sleep - minSleep) / (maxSleep - minSleep)) * (SX1 - SX0);
+  const px = (sleep: number) => SX0 + ((sleep - minSleep) / Math.max(1, maxSleep - minSleep)) * (SX1 - SX0);
   const py = (water: number) => SY1 - ((water - wMin) / Math.max(1, wMax - wMin)) * (SY1 - SY0);
 
   // ---- Card C: weekly late screen time ----

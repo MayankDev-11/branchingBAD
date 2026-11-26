@@ -9,9 +9,13 @@ demo one, so the demo story stays the same however many files are uploaded.
 import os
 import shutil
 import tempfile
+import threading
+import zipfile
 from dataclasses import asdict
 from pathlib import Path
+from xml.etree.ElementTree import ParseError
 
+from defusedxml.common import DefusedXmlException
 from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
@@ -24,6 +28,7 @@ router = APIRouter(prefix="/api", tags=["insights"])
 
 MAX_UPLOAD_BYTES = 2 * 1024**3  # 2 GB: big multi-year exports are a few hundred MB zipped
 IMPORT_DB = Path(__file__).resolve().parents[1] / "data" / "apple_health.db"
+_IMPORT_LOCK = threading.Lock()
 
 
 @router.get("/insights")
@@ -33,13 +38,14 @@ def get_insights() -> dict:
 
 
 def _import(path: Path) -> dict:
-    conn = connect(os.environ.get("ROOTTRACE_IMPORT_DB", IMPORT_DB))
-    try:
-        summary = import_export(conn, path)
-        conn.commit()
-        return asdict(summary)
-    finally:
-        conn.close()
+    with _IMPORT_LOCK:
+        conn = connect(os.environ.get("ROOTTRACE_IMPORT_DB", IMPORT_DB))
+        try:
+            summary = import_export(conn, path)
+            conn.commit()
+            return asdict(summary)
+        finally:
+            conn.close()
 
 
 @router.post("/import/apple-health")
@@ -62,8 +68,10 @@ async def import_apple_health(request: Request, filename: str = "export.zip") ->
             raise HTTPException(400, "The file is empty")
         try:
             summary = await run_in_threadpool(_import, path)
-        except Exception as exc:  # zip without export.xml, broken XML, ...
+        except (ValueError, zipfile.BadZipFile, ParseError, DefusedXmlException) as exc:
             raise HTTPException(400, f"Could not read this export: {exc}") from exc
+        except Exception:
+            raise HTTPException(500, "Could not save this import.") from None
         summary["source_file"] = Path(filename).name
         return summary
     finally:

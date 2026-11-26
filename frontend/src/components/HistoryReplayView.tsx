@@ -1005,7 +1005,7 @@ const HistoryReplayInner: React.FC<HistoryReplayViewProps> = ({
                     className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-mono text-[10px] transition-all whitespace-nowrap"
                     style={{
                       backgroundColor: active ? 'var(--trunk)' : passed ? 'var(--s2)' : 'transparent',
-                      color: active ? '#030c0e' : passed ? 'var(--branch-open)' : 'var(--t3)',
+                      color: active ? 'var(--btn-ink)' : passed ? 'var(--branch-open)' : 'var(--t3)',
                       fontWeight: active ? 700 : 500,
                     }}
                   >

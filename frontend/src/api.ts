@@ -152,6 +152,11 @@ const CONCLUDED_BRANCH_MOCK: BranchDetailResponse = {
 
 const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
+async function errorDetail(res: Response, fallback: string): Promise<string> {
+  const failure = await res.json().catch(() => null);
+  return typeof failure?.detail === 'string' ? failure.detail : fallback;
+}
+
 let mockExperimentLocked = true;
 let mockClockDaysAdvanced = 0;
 const customBranches: GraphBranch[] = [];
@@ -298,7 +303,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     });
-    if (!res.ok) throw new Error(`Create branch failed (${res.status})`);
+    if (!res.ok) throw new Error(await errorDetail(res, `Create branch failed (${res.status})`));
     return res.json();
   },
 
@@ -313,8 +318,7 @@ export const api = {
       method: 'POST', credentials: 'include',
     });
     if (!res.ok) {
-      const failure = await res.json().catch(() => ({}));
-      throw new Error(typeof failure.detail === 'string' ? failure.detail : 'Could not generate Gemini drafts.');
+      throw new Error(await errorDetail(res, 'Could not generate Gemini drafts.'));
     }
     return res.json();
   },
@@ -336,8 +340,7 @@ export const api = {
       body: JSON.stringify({ action, resolution }),
     });
     if (!res.ok) {
-      const failure = await res.json().catch(() => ({}));
-      throw new Error(typeof failure.detail === 'string' ? failure.detail : 'Could not close this branch.');
+      throw new Error(await errorDetail(res, 'Could not close this branch.'));
     }
     return res.json();
   },
@@ -349,8 +352,7 @@ export const api = {
       method: 'POST', credentials: 'include', body: form,
     });
     if (!res.ok) {
-      const failure = await res.json().catch(() => ({}));
-      throw new Error(typeof failure.detail === 'string' ? failure.detail : 'ElevenLabs transcription failed.');
+      throw new Error(await errorDetail(res, 'ElevenLabs transcription failed.'));
     }
     const { transcript } = await res.json();
     return transcript;
@@ -392,7 +394,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ branch_id: branchId, question }),
     });
-    if (!res.ok) throw new Error(`POST /api/ask failed (${res.status})`);
+    if (!res.ok) throw new Error(await errorDetail(res, `POST /api/ask failed (${res.status})`));
     return res.json();
   },
 
@@ -422,7 +424,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
-    if (!res.ok) throw new Error(`Lock failed (${res.status})`);
+    if (!res.ok) throw new Error(await errorDetail(res, `Lock failed (${res.status})`));
     return res.json();
   },
 
@@ -459,8 +461,7 @@ export const api = {
       { method: 'POST', credentials: 'include', body: file }
     );
     if (!res.ok) {
-      const detail = await res.json().then((d) => d?.detail as string | undefined).catch(() => undefined);
-      throw new Error(detail ?? `Upload failed (${res.status})`);
+      throw new Error(await errorDetail(res, `Upload failed (${res.status})`));
     }
     return res.json();
   },
@@ -482,8 +483,7 @@ export async function synthesizeWithElevenLabs(text: string): Promise<string> {
     body: JSON.stringify({ text }),
   });
   if (!res.ok) {
-    const failure = await res.json().catch(() => ({}));
-    throw new Error(typeof failure.detail === 'string' ? failure.detail : 'ElevenLabs narration unavailable.');
+    throw new Error(await errorDetail(res, 'ElevenLabs narration unavailable.'));
   }
   const url = URL.createObjectURL(await res.blob());
   ttsAudioCache.set(text, url);

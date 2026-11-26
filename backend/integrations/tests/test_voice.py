@@ -83,3 +83,31 @@ def test_transcription_reports_actionable_provider_errors(monkeypatch, provider_
     assert response.status_code == api_status
     assert message in response.json()["detail"]
     assert "Private provider diagnostic" not in response.text
+
+
+def test_elevenlabs_synthesize_falls_back_when_spacy_unavailable(monkeypatch):
+    from backend.privacy.questions import PrivacyUnavailable
+
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "mock-elevenlabs-key")
+    monkeypatch.setenv("ELEVENLABS_VOICE_ID", "")
+    monkeypatch.setattr(voice, "scrub_question", Mock(side_effect=PrivacyUnavailable("missing spacy")))
+
+    def provider(url, **kwargs):
+        sent = kwargs["json"]["text"]
+        assert "Judge" not in sent
+        assert "demo@roottrace.local" not in sent
+        assert "9876543210" not in sent
+        return httpx.Response(
+            200, content=b"demo mp3", headers={"Content-Type": "audio/mpeg"},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(voice.httpx, "post", provider)
+    with TestClient(app) as client:
+        client.post("/api/auth/demo").raise_for_status()
+        response = client.post(
+            "/api/voice/synthesize",
+            json={"text": "Judge Demo Workspace demo@roottrace.local 9876543210 summary"},
+        )
+    assert response.status_code == 200
+    assert response.content == b"demo mp3"
