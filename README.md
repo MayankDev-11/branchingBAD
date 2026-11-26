@@ -122,7 +122,7 @@ You can also create your own account with **New User**. Passwords are hashed wit
 | **Ask box (AI answers, "What the AI saw", red-flag check)** | ✅ Works (Bedrock or Gemini free-tier mode via `ROOTTRACE_AI_PROVIDER`) |
 | **Weekly report** (`/api/report/weekly`) & **Obsidian ZIP** (`/api/export/obsidian`) | ✅ Works on live API routes |
 | **"New Branch" button** (manual & ElevenLabs voice + Gemini drafts + resolve/dissolve) | ✅ Works, persisted in `data/roottrace_workspace.db` |
-| Connect with Google Health | ⏳ Planned (OAuth stub notice in UI) |
+| **Connect a Fitbit / Pixel Watch** (Google Health API) | ✅ Built: Google sign-in, imports 90 days of sleep and steps. Needs your own Google Cloud OAuth client in `.env` (see below) |
 
 ## How it works
 
@@ -168,6 +168,31 @@ All `/api/*` data routes need the sign-in cookie. Exact response shapes are in [
 | `POST /api/ask` · `GET /api/report/weekly` · `GET /api/export/obsidian` | AI answers, cited weekly report + audio, and Obsidian vault ZIP |
 | `POST /api/branches` · `GET /api/branches/history` · `POST /api/branches/{id}/transition` · `GET/POST /api/branches/{id}/drafts` · `GET /api/knowledge` | Workspace branch creation, Gemini hypothesis drafts, resolution memory, and replay history |
 | `POST /api/voice/synthesize` · `POST /api/voice/transcribe` | Server-side ElevenLabs TTS narration and Scribe STT transcription |
+| `GET /api/connect/google/status` · `/start` · `/callback` · `POST /sync` · `/disconnect` | Fitbit / Pixel Watch through the Google Health API: sign in, import sleep and steps, revoke |
+
+## Connecting a Fitbit or Pixel Watch (optional)
+
+The old Fitbit Web API was switched off on 2 Nov 2026. Fitbit and Pixel Watch data now comes from the **Google Health API**, with a Google sign-in. RootTrace reads the last 90 days of **sleep** and **daily steps** (read-only), saves them as records in the signed-in account's own database (`backend/data/google_health_<account>.db`, never the demo data), and runs change detection on them. Sign-in tokens are stored encrypted and **Disconnect** revokes them.
+
+**One-time Google setup (about 10 minutes, needs a Google account):**
+
+1. Open [Google Cloud console](https://console.cloud.google.com), create a project (for example "RootTrace Dev").
+2. **APIs & Services → Library**: search **Google Health API**, click **Enable**.
+3. **Google Auth Platform** (OAuth consent screen):
+    - **Branding**: app name RootTrace, your email as support and developer contact.
+    - **Audience**: User type **External**, publishing status **Testing**. Under **Test users**, add the Gmail of everyone who will connect.
+    - **Data Access**: **Add or remove scopes**, search "Google Health API", tick `googlehealth.sleep.readonly` and `googlehealth.activity_and_fitness.readonly`, then **Update** and **Save**.
+4. **Clients** → **Create client** → type **Web application**. Under **Authorized redirect URIs** add exactly `http://localhost:5173/api/connect/google/callback`. Create, then copy the **Client ID** and **Client secret**.
+5. Add them to `.env` (never commit it) and restart the backend:
+    ```
+    GOOGLE_HEALTH_CLIENT_ID=...apps.googleusercontent.com
+    GOOGLE_HEALTH_CLIENT_SECRET=...
+    ```
+6. On the phone, open the **Google Health (Fitbit) app** and sign in with the **same Google account**, so it is linked to Google Health. Let the watch sync.
+
+**Connect:** sign in to RootTrace, open **Data & help → Fitbit / Pixel Watch → Connect with Google Health**, pick the Google account, allow sleep and activity. Because the app is in Testing mode, Google shows "Google hasn't verified this app": choose **Advanced → Go to RootTrace**. You come back to RootTrace with your nights and steps imported.
+
+Notes: in Testing mode Google's sign-in lasts 7 days, then press **Reconnect**. If Google shows "Access blocked", check the account is a listed test user and the redirect URI matches exactly.
 
 ## Using your own Apple Health data (optional)
 
@@ -230,6 +255,10 @@ Optional environment variables (the defaults work out of the box):
 | `ROOTTRACE_AUTH_DB_PATH` | `backend/data/roottrace_auth.db` | Accounts and sessions |
 | `ROOTTRACE_IMPORT_DB` | `backend/data/apple_health.db` | Where uploads are imported |
 | `ROOTTRACE_WORKSPACE_DB` | `data/roottrace_workspace.db` | User-created branches and resolutions |
+| `GOOGLE_HEALTH_CLIENT_ID` / `GOOGLE_HEALTH_CLIENT_SECRET` | (none) | Google Cloud OAuth client for Fitbit / Pixel Watch |
+| `GOOGLE_HEALTH_REDIRECT_URI` | `http://localhost:5173/api/connect/google/callback` | Must match the OAuth client's redirect URI |
+| `ROOTTRACE_CONNECTIONS_DB` | `data/roottrace_connections.db` | Encrypted Google sign-in tokens |
+| `ROOTTRACE_TOKEN_KEY` | key file in `data/secrets/` | Encryption key for those tokens |
 | `FRONTEND_ORIGINS` | `http://localhost:5173` | Extra allowed origins, comma-separated |
 
 ## Tests

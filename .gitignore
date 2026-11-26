@@ -32,3 +32,6 @@ node_modules/
 dist/
 *.tsbuildinfo
 .vite/
+
+# Encryption key for stored sign-in tokens (Google Health); generated on first use
+data/secrets/

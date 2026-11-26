@@ -228,6 +228,30 @@ export interface InsightsResponse {
   };
 }
 
+// /api/connect/google/* : Fitbit / Pixel Watch through the Google Health API
+export interface GoogleHealthSync {
+  synced_at: string;
+  range: { start: string; end: string };
+  nights: number;
+  avg_sleep_min: number | null;
+  step_days: number;
+  avg_steps: number | null;
+  new_observations: Record<string, number>;
+  already_present: number;
+  excluded: number;
+  change_events: { date: string; label: string }[];
+  missing_scopes: string[];
+  recent: { date: string; sleep_min: number | null; sleep_id: string | null; steps: number | null; steps_id: string | null }[];
+}
+
+export interface GoogleHealthStatus {
+  configured: boolean;
+  connected: boolean;
+  needs_reconnect: boolean;
+  linked_at: string | null;
+  last_sync: GoogleHealthSync | null;
+}
+
 // POST /api/import/apple-health
 export interface ImportSummary {
   source_file: string;
