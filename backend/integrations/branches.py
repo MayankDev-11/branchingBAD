@@ -24,12 +24,19 @@ from backend.integrations.knowledge_store import initialize_knowledge, knowledge
 from backend.routes.branches import get_branch as demo_branch
 from backend.routes.experiments import AdvanceBody, advance as advance_demo, reset as reset_demo
 from backend.routes.graph import get_graph as demo_graph
+from backend.routes.insights import get_insights as demo_insights
 
 router = APIRouter(prefix="/api", tags=["workspace branches"])
 User = Annotated[CurrentUser, Depends(get_current_user)]
 Label = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 ALIASES = {"late_screen_min": "screen_late_min", "caffeine": "caffeine_pm"}
 DEFAULT_DB = Path(__file__).resolve().parents[2] / "data" / "roottrace_workspace.db"
+PRESENTATION_DB = DEFAULT_DB.with_name("roottrace_presentation.db")
+CAFFEINE_BRANCH_ID = "br_0"
+
+
+def _caffeine_presentation() -> bool:
+    return os.environ.get("ROOTTRACE_CAFFEINE_PRESENTATION") == "1"
 
 
 class BranchInput(BaseModel):
@@ -58,7 +65,7 @@ class BranchTransition(BaseModel):
 
 
 def _connect() -> sqlite3.Connection:
-    path = Path(os.environ.get("ROOTTRACE_WORKSPACE_DB", DEFAULT_DB))
+    path = PRESENTATION_DB if _caffeine_presentation() else Path(os.environ.get("ROOTTRACE_WORKSPACE_DB", DEFAULT_DB))
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row
@@ -138,6 +145,10 @@ def _workspace_entries(user_id: str) -> list[tuple[str, dict]]:
 
 
 def _with_workspace(graph: dict, user_id: str) -> dict:
+    if _caffeine_presentation():
+        graph["branches"] = [branch for branch in graph["branches"] if branch["id"] == CAFFEINE_BRANCH_ID]
+        graph["change_events"] = []
+        graph["knowledge"] = [item for item in graph["knowledge"] if item["id"] == "kn_1"]
     for lane, (branch_id, payload) in enumerate(_workspace_entries(user_id), 2):
         lifecycle = payload.get("lifecycle")
         if lifecycle == "dissolved":
@@ -184,6 +195,19 @@ def create_branch(body: BranchInput, user: User, response: Response) -> dict:
 def workspace_graph(user: User, response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store"
     return _with_workspace(demo_graph(), user.id)
+
+
+@router.get("/insights", include_in_schema=False)
+def workspace_insights(user: User) -> dict:
+    insights = demo_insights()
+    if _caffeine_presentation():
+        insights["sleep_shift"] = None
+        insights["experiment"] = None
+        insights["hypotheses"] = [
+            item for item in insights["hypotheses"] if item["branch_id"] == CAFFEINE_BRANCH_ID
+        ]
+        insights["knowledge_count"] = len(_with_workspace(demo_graph(), user.id)["knowledge"])
+    return insights
 
 
 @router.get("/branches/history")
@@ -296,6 +320,9 @@ def transition_branch(branch_id: str, body: BranchTransition, user: User, respon
 @router.get("/branches/{branch_id}")
 def branch_detail(branch_id: str, user: User, response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store"
+    if _caffeine_presentation() and branch_id == "br_1":
+        # The dashboard fetches both demo IDs and opens br_1 from Investigations.
+        return demo_branch(CAFFEINE_BRANCH_ID)
     if not branch_id.startswith("br_custom_"):
         return demo_branch(branch_id)
     payload = workspace_branch(user.id, branch_id)
