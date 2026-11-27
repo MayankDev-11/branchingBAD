@@ -187,7 +187,7 @@ def test_voice_synthesize_validates_presets_and_translates_scrubbed_text(monkeyp
         assert captured[-1][0].endswith(f"/{voice.VOICE_PRESETS['charlie']['id']}")
         assert captured[-1][1] == {
             "model_id": "eleven_v4_turbo",
-            "text": "[REDACTED] नींद में 47 मिनट की कमी",
+            "text": "नींद में 47 मिनट की कमी",
             "language_code": "hi",
         }
 
@@ -286,7 +286,7 @@ def test_voice_synthesize_translation_falls_back_gracefully_when_offline(monkeyp
     assert res.status_code == 200
     assert captured[0] == {
         "model_id": "eleven_v4_turbo",
-        "text": "[REDACTED] slept 47 min less",
+        "text": "slept 47 min less",
         "language_code": "kn",
     }
 

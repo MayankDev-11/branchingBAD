@@ -13,24 +13,15 @@ import {
   X,
 } from 'lucide-react';
 import { api } from '../../api';
-import { toBcp47VoiceLang } from '../VoiceControl';
 import type { CreateBranchInput } from '../../types';
 
 interface NewBranchModalProps {
   open: boolean;
   initialMode: 'manual' | 'voice';
+  timelineDate: string;
   onClose: () => void;
   onCreate: (input: CreateBranchInput) => Promise<void>;
 }
-
-const METRIC_OPTIONS = [
-  ['sleep_min', 'Sleep'],
-  ['water_ml', 'Water intake'],
-  ['steps', 'Steps'],
-  ['headache', 'Headache'],
-  ['late_screen_min', 'Late screen time'],
-  ['caffeine', 'Late caffeine'],
-] as const;
 
 const VOICE_INPUT_LANGUAGES = [
   { id: 'auto', label: 'Auto (90+)' },
@@ -49,7 +40,6 @@ const VOICE_PRESETS = [
     parsed: {
       title: 'Why do I crash at 3 PM every afternoon?',
       branch_type: 'investigation' as const,
-      metrics: ['sleep_min', 'steps'],
       outcome: 'afternoon_energy' as NonNullable<CreateBranchInput['outcome']>,
       hypotheses: [],
     },
@@ -61,7 +51,6 @@ const VOICE_PRESETS = [
     parsed: {
       title: 'Walk 25 min every morning before 9 AM',
       branch_type: 'habit' as const,
-      metrics: ['steps', 'sleep_min'],
       outcome: 'auto' as NonNullable<CreateBranchInput['outcome']>,
       hypotheses: [],
     },
@@ -71,7 +60,6 @@ const VOICE_PRESETS = [
 function extractStructuredFromTranscript(transcript: string, englishSource?: string): {
   title: string;
   branch_type: 'investigation' | 'habit';
-  metrics: string[];
   outcome: NonNullable<CreateBranchInput['outcome']>;
   hypotheses: string[];
 } {
@@ -83,22 +71,6 @@ function extractStructuredFromTranscript(transcript: string, englishSource?: str
     lower.includes('every morning') ||
     lower.includes('routine');
 
-  const metrics: string[] = [];
-  if (lower.includes('sleep') || lower.includes('tired') || lower.includes('crash')) metrics.push('sleep_min');
-  if (lower.includes('water') || lower.includes('hydrat')) metrics.push('water_ml');
-  if (lower.includes('walk') || lower.includes('step') || lower.includes('gym')) metrics.push('steps');
-  if (lower.includes('headache') || lower.includes('migraine')) metrics.push('headache');
-  if (lower.includes('screen') || lower.includes('phone')) metrics.push('late_screen_min');
-  if (lower.includes('coffee') || lower.includes('caffeine') || lower.includes('chai')) metrics.push('caffeine');
-
-  let outcome: NonNullable<CreateBranchInput['outcome']> = 'auto';
-  if (lower.includes('headache') || lower.includes('migraine')) outcome = 'headache';
-  else if (lower.includes('crash') || lower.includes('afternoon') || lower.includes('slump') || lower.includes('fatigue') || lower.includes('tired')) {
-    outcome = 'afternoon_energy';
-  } else if (lower.includes('sleep') || lower.includes('insomnia')) {
-    outcome = 'sleep_min';
-  }
-
   const cleanedTitle = analysisText
     .replace(/^(create|start|log|add)\s+(a\s+)?(new\s+)?(branch|habit|investigation)\s*(for|to|about)?\s*/i, '')
     .trim();
@@ -108,8 +80,7 @@ function extractStructuredFromTranscript(transcript: string, englishSource?: str
   return {
     title: shortTitle,
     branch_type: isHabit ? 'habit' : 'investigation',
-    metrics,
-    outcome,
+    outcome: 'auto',
     hypotheses: [],
   };
 }
@@ -117,16 +88,19 @@ function extractStructuredFromTranscript(transcript: string, englishSource?: str
 export const NewBranchModal: React.FC<NewBranchModalProps> = ({
   open,
   initialMode,
+  timelineDate,
   onClose,
   onCreate,
 }) => {
   const [mode, setMode] = useState<'manual' | 'voice'>(initialMode);
   const [branchType, setBranchType] = useState<'investigation' | 'habit'>('investigation');
   const [title, setTitle] = useState('');
-  const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
   const [hypInput, setHypInput] = useState('');
   const [outcome, setOutcome] = useState<NonNullable<CreateBranchInput['outcome']>>('auto');
-  const [startDate, setStartDate] = useState('2026-11-18');
+  const [startDate, setStartDate] = useState(timelineDate);
+  useEffect(() => {
+    if (open) setStartDate(timelineDate);
+  }, [open, timelineDate]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -175,34 +149,16 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
 
   if (!open) return null;
 
-  const toggleMetric = (m: string) => {
-    setSelectedMetrics((prev) =>
-      prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]
-    );
-  };
-
   const applyParsedDraft = (parsed: {
     title: string;
     branch_type: 'investigation' | 'habit';
-    metrics: string[];
     outcome?: NonNullable<CreateBranchInput['outcome']>;
     hypotheses: string[];
   }) => {
     setTitle(parsed.title);
     setBranchType(parsed.branch_type);
-    setSelectedMetrics(parsed.metrics);
     setHypInput(parsed.hypotheses.join(', '));
     setOutcome(parsed.outcome ?? 'auto');
-  };
-
-  const speakConfirmation = (text: string, langCode = 'en') => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = toBcp47VoiceLang(langCode);
-      utter.rate = 1.04;
-      window.speechSynthesis.speak(utter);
-    }
   };
 
   const startVoiceCapture = async () => {
@@ -272,7 +228,6 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
               ? `Transcribed via ElevenLabs Scribe v3 (${resolvedLang.toUpperCase()}) · Review & approve branch below`
               : 'Transcribed via ElevenLabs Scribe v3 · Review & approve branch below'
           );
-          speakConfirmation(`Drafted ${parsed.branch_type} branch: ${parsed.title}`, 'en');
         } catch (error) {
           if (captureVersion.current === version) {
             setVoiceStatus(error instanceof Error ? error.message : 'Transcription failed. Try again or type the branch.');
@@ -314,7 +269,6 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
     setDetectedLanguage('en');
     applyParsedDraft(preset.parsed);
     setVoiceStatus('Sample voice draft ready · Review before creating the branch');
-    speakConfirmation(`Drafted ${preset.parsed.branch_type} branch: ${preset.parsed.title}`);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -331,7 +285,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
         title: title.trim(),
         branch_type: branchType,
         start_date: startDate,
-        metrics: selectedMetrics,
+        metrics: [],
         outcome,
         hypotheses: hyps,
         generate_drafts: branchType === 'investigation' && hyps.length === 0,
@@ -570,14 +524,15 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
 
           {/* Question / Branch Title */}
           <div>
-            <label className="block font-mono text-[10px] uppercase text-t3 mb-1.5">
+            <label htmlFor="new-branch-title" className="block font-mono text-[10px] uppercase text-t3 mb-1.5">
               {branchType === 'habit' ? 'Habit Goal' : 'Investigation Question'}
             </label>
             <input
+              id="new-branch-title"
               type="text"
               required
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => { setTitle(e.target.value); setSubmitError(''); }}
               placeholder={
                 branchType === 'habit'
                   ? 'e.g. Walk 25 min every morning before 9 AM'
@@ -595,7 +550,7 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
             </label>
             <input
               type="text"
-              placeholder="Leave blank for Gemini drafts on a supported outcome"
+              placeholder="e.g. short sleep, late caffeine"
               value={hypInput}
               onChange={(e) => setHypInput(e.target.value)}
               className="w-full px-3.5 py-2 rounded-xl font-mono text-[11.5px] text-t2 focus:outline-none"
@@ -621,46 +576,18 @@ export const NewBranchModal: React.FC<NewBranchModalProps> = ({
             </label>
           )}
 
-          {/* Tracked Metrics & Start Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="sm:col-span-2">
-              <label className="block font-mono text-[10px] uppercase text-t3 mb-1.5">
-                Metrics to Link
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {METRIC_OPTIONS.map(([m, label]) => {
-                  const active = selectedMetrics.includes(m);
-                  return (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => toggleMetric(m)}
-                      className="px-2.5 py-1 rounded-full font-mono text-[10px] transition-colors"
-                      style={{
-                        backgroundColor: active ? 'rgba(20, 184, 166, 0.18)' : 'var(--bg)',
-                        color: active ? 'var(--branch-open)' : 'var(--t3)',
-                        border: active ? '1px solid var(--branch-open)' : '1px solid var(--border)',
-                      }}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div>
-              <label className="block font-mono text-[10px] uppercase text-t3 mb-1.5">
-                Anchor Date
-              </label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-2.5 py-1.5 rounded-lg font-mono text-[11px] text-t1 focus:outline-none"
-                style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
-              />
-            </div>
-          </div>
+          <p className="text-[11.5px] text-t2">
+            RootTrace links relevant tracked metrics automatically. You can review the evidence after saving.
+          </p>
+          <label className="block space-y-1.5">
+            <span className="block font-mono text-[10px] uppercase text-t3">Anchor date</span>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="rounded-lg border border-border bg-bg px-2.5 py-1.5 font-mono text-[11px] text-t1"
+            />
+          </label>
 
           {submitError && (
             <p role="alert" className="text-[12px] text-change">

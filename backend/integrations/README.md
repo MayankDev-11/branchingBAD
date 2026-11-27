@@ -57,11 +57,12 @@ workspace database (`data/roottrace_workspace.db`, overridable with
 `ROOTTRACE_WORKSPACE_DB`). They stay visible after reload or a demo clock reset.
 The shared Judge Demo login uses one shared demo account.
 
-Select linked factors and the outcome the branch should explain. Leaving possible
-factors blank derives them from the chosen metrics. Linked demo readings remain
-available for context. Matched, supported demo outcomes use Python's pattern
-comparison for scoring. Missing outcomes, such as afternoon energy, and factors
-with insufficient paired evidence stay unscored. The voice transcript is not persisted.
+RootTrace links relevant tracked metrics from the question. Choose an outcome or
+enter possible factors when you want to make an investigation more specific.
+Matched, supported demo outcomes use Python's pattern comparison for scoring.
+Where available, paired readings give additional context. Missing outcomes, such
+as afternoon energy, remain unscored and can be tracked prospectively. The voice
+transcript is not persisted.
 
 Workspace branches can be resolved or dissolved from Investigations. Resolving
 requires a note and moves that note into the main timeline as a user resolution.
@@ -74,13 +75,19 @@ audio brief keeps its browser speech fallback. Voice recordings are sent to
 ElevenLabs only when using microphone transcription. The raw recording is not
 retained by the app. [ElevenLabs transcription](https://elevenlabs.io/docs/api-reference/speech-to-text/convert) · [Narration](https://elevenlabs.io/docs/api-reference/text-to-speech/convert)
 
-Leaving possible factors blank uses the local catalog for headache, sleep,
-bedtime, energy, mood, activity, water, caffeine, and screen-use investigations.
-The catalog prioritizes relevant tracked factors mentioned in the question.
-Existing branches can use **Generate Gemini drafts** to select from synthetic
-readings. Only supported headache and sleep comparisons with matched records get
-a score. Afternoon energy has no direct demo readings. A question about
-urination displays local guidance and skips draft generation.
+Leaving possible factors blank uses the local catalog, which also supports
+prospective questions about focus, stress, sleep quality, and recovery. Gemini
+sees a fixed topic and synthetic summaries. A provider failure keeps the local
+suggestions available. Clearly unrelated questions get an explanation and
+examples. Unsupported symptoms can display local guidance and skip the provider.
+
+Open a proposed test on a workspace investigation to review and lock its two
+daily check-in questions. Each day has one factor answer and one outcome answer.
+After at least seven logged days and three in each group, Python compares how
+often the outcome occurred with and without the factor. A difference smaller than
+ten percentage points is inconclusive. This comparison measures association.
+Test plans, observations, and results stay in the signed-in user's local workspace.
+Closing a branch ends its active test and retains the recorded observations.
 
 Resolving a branch adds its note to `workspace_knowledge` in the same SQLite
 workspace database. The first use backfills previously resolved branches.

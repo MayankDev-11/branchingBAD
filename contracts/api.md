@@ -6,6 +6,11 @@ Frontend dev origin (add to FastAPI CORSMiddleware): `http://localhost:5173`
 ## Endpoints
 - `GET /api/graph` -> matches `contracts/sample_graph.json`
 - `GET /api/branches/{id}` -> matches `contracts/sample_branch.json` for demo branches. A workspace branch that returns local guidance has a `guidance` object with `title` and `message`, and empty `hypotheses` and `evidence` arrays. See `contracts/sample_workspace_guidance.json`.
+- `POST /api/branches` -> clearly unrelated investigation questions without manual metrics or hypotheses return 422 with a helpful message. Unsupported health topics can return local guidance.
+- `GET /api/branches/{id}/tests/protocol` -> read-only preview of the eligible hypotheses, check-in questions, and comparison rules. See `contracts/sample_workspace_test_protocol.json`.
+- `GET /api/branches/{id}/tests` -> returns the signed-in user's tests as an array. `POST` sends `{"rank": 1, "expected_factor": "Short sleep"}` to lock the chosen plan. `expected_factor` optionally guards against a stale preview.
+- `POST /api/branches/{id}/tests/{test_id}/check-ins` -> stores `{"date": "YYYY-MM-DD", "exposed": true, "outcome": false}` locally. Identical retries are safe. A different entry for a saved date returns 409.
+- `POST /api/branches/{id}/tests/{test_id}/finish` evaluates the saved check-ins. `POST /api/branches/{id}/tests/{test_id}/cancel` closes the test with its observations preserved. Test mutations return `contracts/sample_workspace_test.json` shape. These routes apply to workspace investigations.
 - `GET /api/records/{id}` -> matches `contracts/sample_record.json`
 - `POST /api/experiments/{id}/lock` -> locks `success_criterion`, sets `locked=true`, `locked_at`
 - `POST /api/demo/advance` -> body `{"days": number}`, returns updated `GET /api/graph` shape

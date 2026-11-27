@@ -9,6 +9,7 @@ from backend.integrations.branches import router as workspace_router
 from backend.integrations.connect import router as google_health_router
 from backend.integrations.routes import router as integrations_router
 from backend.integrations.voice import router as voice_router
+from backend.integrations.workspace_tests import router as workspace_tests_router
 from backend.routes import branches, experiments, insights
 
 # Exact origins only: cookies are sent with allow_credentials, so never '*'.
@@ -54,6 +55,7 @@ app.include_router(auth_router)
 # Mount workspace_router before core fallback routes so /api/branches/history,
 # /api/graph, and /api/demo/* resolve cleanly without path shadowing.
 app.include_router(workspace_router)
+app.include_router(workspace_tests_router)
 app.include_router(integrations_router)
 app.include_router(voice_router)
 # Fitbit / Pixel Watch through the Google Health API. Each route checks sign-in itself

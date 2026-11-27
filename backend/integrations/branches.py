@@ -13,14 +13,21 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 from backend.ai.gemini import GeminiUnavailable
-from backend.ai.knowledge_catalog import URINARY, URINARY_GUIDANCE, URINARY_LABEL
+from backend.ai.knowledge_catalog import off_topic_question
 from backend.auth.dependencies import CurrentUser, get_current_user
 from backend.data.metrics import METRICS
 from backend.data.queries import build_record
 from backend.data.store import store
 from backend.integrations.branch_drafts import DraftsUnavailable, can_generate, generate_workspace_drafts
-from backend.integrations.branch_evidence import workspace_hypotheses, workspace_metrics, workspace_outcome
+from backend.integrations.branch_evidence import (
+    workspace_drafts_match,
+    workspace_hypotheses,
+    workspace_metrics,
+    workspace_outcome,
+    workspace_question_guidance,
+)
 from backend.integrations.knowledge_store import initialize_knowledge, knowledge_entries, remember_resolution
+from backend.integrations.workspace_tests import cancel_active_workspace_test, has_active_workspace_test
 from backend.routes.branches import get_branch as demo_branch
 from backend.routes.experiments import AdvanceBody, advance as advance_demo, reset as reset_demo
 from backend.routes.graph import get_graph as demo_graph
@@ -111,8 +118,8 @@ def _detail(branch_id: str, payload: dict) -> dict:
         "status": _status(payload), "start_date": payload["start_date"], "change_event": None,
         "hypotheses": [], "experiment": None, "evidence": [],
     }
-    if outcome == URINARY:
-        return {**detail, "guidance": {"title": URINARY_LABEL, "message": URINARY_GUIDANCE}}
+    if guidance := workspace_question_guidance(payload):
+        return {**detail, "guidance": guidance}
 
     readings = []
     with store.connection() as conn:
@@ -167,6 +174,9 @@ def _with_workspace(graph: dict, user_id: str) -> dict:
 def create_branch(body: BranchInput, user: User, response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store"
     payload = body.model_dump(mode="json")
+    if (body.branch_type == "investigation" and body.outcome == "auto"
+            and not body.hypotheses and not body.metrics and off_topic_question(body.title)):
+        raise HTTPException(422, "Try a question about a health pattern you can track, such as sleep, headaches, energy, or activity.")
     draft_error = None
     if body.generate_drafts and not body.hypotheses and can_generate(payload):
         try:
@@ -236,7 +246,7 @@ def _draft_context(user_id: str, branch_id: str, payload: dict) -> dict:
             ]
     return {
         "can_generate": can_generate(payload),
-        "sent_to_ai": payload.get("draft_sent_to_ai", ""),
+        "sent_to_ai": payload.get("draft_sent_to_ai", "") if workspace_drafts_match(payload, outcome) else "",
         "related_resolutions": related,
     }
 
@@ -265,6 +275,9 @@ def regenerate_branch_drafts(branch_id: str, user: User, response: Response) -> 
         raise HTTPException(404, "Workspace branch not found.")
     if original.get("lifecycle", "open") != "open":
         raise HTTPException(409, "This branch is already closed.")
+    with closing(_connect()) as conn:
+        if has_active_workspace_test(conn, user.id, branch_id):
+            raise HTTPException(409, "Finish or cancel the active test before changing its hypotheses.")
     try:
         payload = generate_workspace_drafts(original, store.clock)
     except DraftsUnavailable as exc:
@@ -279,6 +292,8 @@ def regenerate_branch_drafts(branch_id: str, user: User, response: Response) -> 
         ).fetchone()
         if not row or json.loads(row["payload"]) != original:
             raise HTTPException(409, "This branch changed while generating drafts. Refresh and try again.")
+        if has_active_workspace_test(conn, user.id, branch_id):
+            raise HTTPException(409, "Finish or cancel the active test before changing its hypotheses.")
         conn.execute(
             "UPDATE workspace_branches SET payload = ? WHERE id = ? AND user_id = ?",
             (json.dumps(payload, ensure_ascii=False), branch_id, user.id),
@@ -311,6 +326,7 @@ def transition_branch(branch_id: str, body: BranchTransition, user: User, respon
                 "UPDATE workspace_branches SET payload = ? WHERE user_id = ? AND id = ?",
                 (json.dumps(payload, ensure_ascii=False), user.id, branch_id),
             )
+            cancel_active_workspace_test(conn, user.id, branch_id)
         if lifecycle == "resolved":
             remember_resolution(conn, branch_id, user.id, payload)
     return {"detail": _detail(branch_id, payload), "graph": _with_workspace(demo_graph(), user.id),

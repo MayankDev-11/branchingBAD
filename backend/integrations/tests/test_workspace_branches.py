@@ -56,6 +56,20 @@ def test_branch_is_saved_visible_and_account_scoped(monkeypatch, tmp_path, fresh
     assert "Private transcript" not in payload
 
 
+def test_live_demo_starts_with_both_seeded_investigations(monkeypatch, tmp_path, fresh_store):
+    monkeypatch.setenv("ROOTTRACE_WORKSPACE_DB", str(tmp_path / "workspace.db"))
+    with TestClient(app) as client:
+        client.post("/api/auth/demo").raise_for_status()
+        graph = client.get("/api/graph").raise_for_status().json()
+        assert [branch["id"] for branch in graph["branches"]] == ["br_0", "br_1"]
+        assert [entry["id"] for entry in graph["knowledge"]] == ["kn_1"]
+        assert client.get("/api/branches/br_0").status_code == 200
+
+        replayed = client.post("/api/demo/advance", json={"days": 10}).raise_for_status().json()
+        assert [branch["id"] for branch in replayed["branches"]] == ["br_0", "br_1"]
+        assert [entry["id"] for entry in replayed["knowledge"]] == ["kn_1", "kn_2"]
+
+
 def test_workspace_scores_only_when_the_outcome_is_tracked(monkeypatch, tmp_path, fresh_store):
     monkeypatch.setenv("ROOTTRACE_WORKSPACE_DB", str(tmp_path / "workspace.db"))
     with TestClient(app) as client:
@@ -235,7 +249,7 @@ def test_gemini_drafts_use_synthetic_evidence_and_keep_resolution_memory_local(m
         assert client.get(f"/api/branches/{detail['id']}").json() == detail
         assert client.post(f"/api/branches/{detail['id']}/drafts").status_code == 200
 
-        for title in ("Plain title", "Why does my app crash?", "Chest pain and headaches",
+        for title in ("Plain title", "Chest pain and headaches",
                       "Chest pain and feeling tired after lunch"):
             untouched = client.post("/api/branches", json={**base, "title": title, "generate_drafts": True})
             assert untouched.json()["detail"]["hypotheses"] == []
@@ -268,3 +282,40 @@ def test_gemini_drafts_use_synthetic_evidence_and_keep_resolution_memory_local(m
         assert only_outcome.status_code == 201, only_outcome.text
         assert len(only_outcome.json()["detail"]["hypotheses"]) == 3
         assert post.call_count == 6
+
+        off_topic = "Why does my app crash?"
+        before = client.get("/api/branches/history").json()
+        invalid = client.post("/api/branches", json={**base, "title": off_topic, "generate_drafts": True})
+        assert invalid.status_code == 422
+        assert "health pattern you can track" in invalid.json()["detail"]
+        assert client.get("/api/branches/history").json() == before
+        invalid_ask = client.post("/api/ask", json={"branch_id": detail["id"], "question": off_topic})
+        assert invalid_ask.status_code == 422
+        assert post.call_count == 6
+
+
+def test_workspace_links_metrics_without_manual_selection(monkeypatch, tmp_path, fresh_store):
+    monkeypatch.setenv("ROOTTRACE_WORKSPACE_DB", str(tmp_path / "workspace.db"))
+    with TestClient(app) as client:
+        client.post("/api/auth/demo").raise_for_status()
+        base = {**DRAFT, "metrics": [], "hypotheses": []}
+        result = client.post("/api/branches", json={**base, "title": "Walk every morning"})
+        result.raise_for_status()
+        habit = result.json()["detail"]
+        assert {item["metric"] for item in habit["evidence"]} == {"steps"}
+        assert habit["hypotheses"][0]["label"] == "Track steps"
+
+        result = client.post("/api/branches", json={
+            **base, "branch_type": "investigation", "title": "Why do I get headaches?",
+            "hypotheses": ["Short sleep"],
+        })
+        result.raise_for_status()
+        detail = result.json()["detail"]
+        assert {item["metric"] for item in detail["evidence"]} == {"sleep_min", "headache"}
+        assert detail["hypotheses"][0]["claims"]
+        follow_up = client.post("/api/ask", json={
+            "branch_id": detail["id"], "question": "What should I test next?",
+        })
+        follow_up.raise_for_status()
+        assert not follow_up.json()["sent_to_ai"]
+        assert [factor["text"] for factor in follow_up.json()["hypotheses"]] == ["Short sleep"]

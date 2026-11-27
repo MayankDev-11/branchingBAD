@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { animate, AnimatePresence, motion } from 'framer-motion';
 import { api, USE_MOCK } from './api';
 import { buildObsidianNote } from './obsidianExport';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
-import { GraphCanvas } from './components/graph/GraphCanvas';
+import { GraphCanvas, type BranchClosure } from './components/graph/GraphCanvas';
 import { InvestigationPanel } from './components/panel/InvestigationPanel';
 import { RecordModal } from './components/modal/RecordModal';
 import { NewBranchModal } from './components/modal/NewBranchModal';
@@ -61,6 +61,7 @@ export const App: React.FC = () => {
   const [branchDetailsMap, setBranchDetailsMap] = useState<Record<string, BranchDetailResponse>>({});
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<BranchDetailResponse | null>(null);
+  const [focusedHypothesisRank, setFocusedHypothesisRank] = useState<number | null>(null);
 
   // Record counts come from GET /api/insights (computed in Python), never a hand-typed number.
   const [insights, setInsights] = useState<InsightsResponse | null>(null);
@@ -78,10 +79,13 @@ export const App: React.FC = () => {
   const [newBranchOpen, setNewBranchOpen] = useState(false);
   const [newBranchMode, setNewBranchMode] = useState<'manual' | 'voice'>('manual');
 
-  const [demoDaysAdvanced, setDemoDaysAdvanced] = useState(0);
+  const [replaying, setReplaying] = useState(false);
+  const [branchClosure, setBranchClosure] = useState<BranchClosure | null>(null);
+  const closingBranch = useRef(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   // An Ask failure keeps its question, so the banner's Retry re-asks it (not a page reload).
-  const [askError, setAskError] = useState<{ message: string; question: string } | null>(null);
+  const [askError, setAskError] = useState<{ message: string; question: string; retryable: boolean } | null>(null);
+  const [savedDraftNotice, setSavedDraftNotice] = useState<{ branchId: string; message: string } | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -121,10 +125,11 @@ export const App: React.FC = () => {
     loadInitialData();
   }, [loadInitialData]);
 
-  const handleSelectBranch = useCallback(async (id: string, targetView?: NavView) => {
+  const handleSelectBranch = useCallback(async (id: string, targetView?: NavView, rank: number | null = null) => {
     setAskResult(null);
     setAskQuestion(null);
     setSelectedBranchId(id);
+    setFocusedHypothesisRank(rank);
     if (targetView) {
       setActiveView(targetView);
     } else {
@@ -183,7 +188,12 @@ export const App: React.FC = () => {
       setAskResult(res);
     } catch (err) {
       // The backend already retried Gemini 3 times; this banner's Retry asks the same question again.
-      setAskError({ message: err instanceof Error ? err.message : 'Ask request failed', question });
+      const status = err instanceof Error && 'status' in err ? Number(err.status) : 0;
+      setAskError({
+        message: err instanceof Error ? err.message : 'Ask request failed',
+        question,
+        retryable: !status || status >= 500 || status === 429,
+      });
     } finally {
       setIsAsking(false);
     }
@@ -191,12 +201,14 @@ export const App: React.FC = () => {
 
   const handleCreateBranch = async (input: CreateBranchInput) => {
     const { branch, detail, draft_error } = await api.createBranch(input);
-    setErrorMsg(draft_error ? `Branch saved. ${draft_error}` : null);
+    setErrorMsg(null);
+    setSavedDraftNotice(draft_error ? { branchId: branch.id, message: draft_error } : null);
     const updatedGraph = await api.getGraph();
     setGraph(updatedGraph);
     setBranchDetailsMap((prev) => ({ ...prev, [branch.id]: detail }));
     setSelectedBranchId(branch.id);
     setSelectedBranch(detail);
+    setFocusedHypothesisRank(null);
     setAskResult(null);
     setAskQuestion(null);
     setActiveView('investigations');
@@ -207,18 +219,34 @@ export const App: React.FC = () => {
 
   const handleGenerateBranchDrafts = async (id: string) => {
     const { detail, context } = await api.generateBranchDrafts(id);
+    setSavedDraftNotice((prev) => prev?.branchId === id ? null : prev);
     setBranchDetailsMap((prev) => ({ ...prev, [id]: detail }));
     setSelectedBranch((prev) => prev?.id === id ? detail : prev);
     return context;
   };
 
   const handleBranchTransition = async (id: string, action: BranchAction, resolution?: string) => {
-    const { graph: updatedGraph, detail, history } = await api.transitionBranch(id, action, resolution);
-    setGraph(updatedGraph);
-    setWorkspaceHistory(history);
-    setBranchDetailsMap((prev) => ({ ...prev, [id]: detail }));
-    setSelectedBranchId(action === 'resolve' ? id : null);
-    setSelectedBranch(action === 'resolve' ? detail : null);
+    if (closingBranch.current || replaying) throw new Error('The timeline is updating. Try again in a moment.');
+    closingBranch.current = true;
+    try {
+      const { graph: updatedGraph, detail, history } = await api.transitionBranch(id, action, resolution);
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches && !document.hidden) {
+        const closure = { id, action, nextGraph: updatedGraph };
+        await animate(0, 1, {
+          duration: 0.78,
+          ease: 'easeInOut',
+          onUpdate: (progress) => setBranchClosure({ ...closure, progress }),
+        });
+      }
+      setGraph(updatedGraph);
+      setWorkspaceHistory(history);
+      setBranchDetailsMap((prev) => ({ ...prev, [id]: detail }));
+      setSelectedBranchId((prev) => prev === id && action === 'dissolve' ? null : prev);
+      setSelectedBranch((prev) => prev?.id === id ? action === 'resolve' ? detail : null : prev);
+    } finally {
+      setBranchClosure(null);
+      closingBranch.current = false;
+    }
   };
 
   const handleLockExperiment = async (expId: string) => {
@@ -235,10 +263,11 @@ export const App: React.FC = () => {
   };
 
   const handleAdvanceDemo = async (days: number) => {
+    if (replaying || closingBranch.current) return;
+    setReplaying(true);
     try {
       setErrorMsg(null);
       const updatedGraph = await api.advanceClock(days);
-      setDemoDaysAdvanced(days);
       setGraph(updatedGraph);
       const customIds = updatedGraph.branches
         .map((b) => b.id)
@@ -262,7 +291,9 @@ export const App: React.FC = () => {
         setSelectedBranch(refreshedCustom[selectedBranchId]);
       }
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to update demo clock');
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to replay the experiment');
+    } finally {
+      setReplaying(false);
     }
   };
 
@@ -322,13 +353,13 @@ export const App: React.FC = () => {
           >
             <span>{askError.message}</span>
             <span className="flex items-center gap-3 shrink-0">
-              <button
+              {askError.retryable && <button
                 type="button"
                 onClick={() => handleAskSubmit(askError.question)}
                 className="underline font-semibold"
               >
                 Retry question
-              </button>
+              </button>}
               <button type="button" onClick={() => setAskError(null)} className="opacity-70 hover:opacity-100">
                 Dismiss
               </button>
@@ -371,9 +402,10 @@ export const App: React.FC = () => {
                         insights={insights}
                         branchDetailsMap={branchDetailsMap}
                         selectedBranchId={selectedBranchId}
-                        isRightPanelOpen={isRightPanelOpen}
-                        demoDaysAdvanced={demoDaysAdvanced}
+                        replaying={replaying}
+                        branchClosure={branchClosure}
                         onSelectBranch={(id) => handleSelectBranch(id)}
+                        onSelectFactor={(id, rank) => { void handleSelectBranch(id, undefined, rank); }}
                         onOpenRecord={handleOpenRecord}
                         onAdvanceDemo={handleAdvanceDemo}
                         onOpenNewBranch={openNewBranch}
@@ -414,6 +446,8 @@ export const App: React.FC = () => {
                           onLockExperiment={handleLockExperiment}
                           onBranchTransition={handleBranchTransition}
                           onGenerateDrafts={handleGenerateBranchDrafts}
+                          focusedHypothesisRank={focusedHypothesisRank}
+                          draftNotice={savedDraftNotice?.branchId === selectedBranch?.id ? savedDraftNotice?.message : undefined}
                           resolution={workspaceHistory.find(({ id }) => id === selectedBranch?.id)?.resolution ?? null}
                         />
                       </motion.div>
@@ -498,6 +532,7 @@ export const App: React.FC = () => {
       <NewBranchModal
         open={newBranchOpen}
         initialMode={newBranchMode}
+        timelineDate={graph?.range.end ?? new Date().toISOString().slice(0, 10)}
         onClose={() => setNewBranchOpen(false)}
         onCreate={handleCreateBranch}
       />

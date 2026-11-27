@@ -1,0 +1,14 @@
+{
+  "minimum_days": 7,
+  "minimum_days_per_group": 3,
+  "threshold_points": 10,
+  "proposals": [
+    {
+      "rank": 1,
+      "factor": "Short sleep",
+      "factor_question": "Did you sleep less than 6 hours last night?",
+      "outcome_question": "Did you have a headache?",
+      "plan": "Keep your usual routine and log the two observations each day."
+    }
+  ]
+}

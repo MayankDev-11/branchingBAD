@@ -100,7 +100,7 @@ The demo database is rebuilt from the seed the first time the backend is used, s
 ## Try the demo
 
 1. On the landing page, click **Explore Judge Demo →**. It signs you in as the demo user, no password needed.
-2. **Dashboard:** the timeline trunk with the 3 Nov sleep drop (red dot), the solved caffeine branch and the open headache branch. Click any node or record chip (like `sl_0071`) to see the raw record.
+2. **Dashboard:** the timeline with the 3 Nov sleep drop and one starter investigation about headaches. Use **New Branch** to create additional investigations live. Click an evidence chip such as `sl_0071` to inspect its source record.
 3. **Investigations:** the three explanations, the counts behind them, and the locked experiment.
 4. **Insights:** sleep against your normal range, sleep vs water, weekly screen time, evidence strength per explanation, and the experiment night by night.
 5. **History:** replay the whole timeline step by step with the → arrow key.

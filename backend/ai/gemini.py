@@ -159,9 +159,11 @@ def select_ranks(topic: str, hypotheses: list[dict]) -> tuple[list[int], str]:
 def propose_drafts(topic: str, hypotheses: list[dict]) -> tuple[list[Draft], str]:
     system = (
         "Draft up to three distinct investigation sub-branches for this fictional demo. "
-        "Choose each factor by its supplied rank. Choose compare_logs when there are useful comparisons "
-        "in the existing logs, or track_prospectively when more observations would clarify the pattern. "
-        "The choices are hypotheses to test. Do not infer causation or present an outcome as established."
+        "Use only the supplied ranks, measurements, and citations. Give priority to factors explicitly named "
+        "in the question. Then favor factors with matched readings in both comparison groups and a clear "
+        "measurement plan. Only select compare_logs when comparison_ready is true. Factor-only coverage "
+        "describes availability and cannot show a relationship. Otherwise select track_prospectively. "
+        "Return an empty selection when none apply. Do not infer causation, diagnose, or propose treatment."
     )
     selection, audit = _request(topic, hypotheses, system, DraftSelection)
     return selection.drafts, audit
@@ -176,7 +178,7 @@ def _request(topic, hypotheses, system, schema):
         "contents": [{"role": "user", "parts": [{"text": json.dumps({
             "topic": topic,
             "hypotheses": [
-                {key: candidate[key] for key in ("rank", "text", "claims")}
+                {key: candidate[key] for key in ("rank", "text", "claims", "context") if key in candidate}
                 for candidate in hypotheses
             ],
         }, ensure_ascii=False, separators=(",", ":"))}]}],
