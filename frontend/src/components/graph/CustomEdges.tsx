@@ -1,5 +1,6 @@
 import React from 'react';
 import { BaseEdge, type EdgeProps } from '@xyflow/react';
+import { TRUNK_Y } from './graphMath';
 
 export interface RootEdgeData extends Record<string, unknown> {
   kind:
@@ -16,6 +17,7 @@ export interface RootEdgeData extends Record<string, unknown> {
     | 'evidence-tendril'
     | 'cross-mycelium';
   animateFlow?: boolean;
+  description?: string;
   isNewStep?: boolean;
   dateTicks?: Array<{ x: number; label: string }>;
 }
@@ -180,10 +182,13 @@ export const OrganicBranchEdge: React.FC<EdgeProps> = ({
 
   let path: string;
   if (kind === 'cross-mycelium') {
-    const c1x = sourceX + dx * 0.45;
-    const c1y = sourceY + dy * 0.15;
-    const c2x = targetX - dx * 0.45;
-    const c2y = targetY - dy * 0.15;
+    const bend = Math.min(230, Math.max(88, Math.hypot(dx, dy) * 0.24));
+    const side = (sourceY + targetY) / 2 < TRUNK_Y ? -1 : 1;
+    const vertical = Math.abs(dx) < Math.abs(dy) * 0.35;
+    const c1x = sourceX + dx * 0.24 + (vertical ? bend : 0);
+    const c1y = sourceY + dy * 0.16 + (vertical ? 0 : side * bend);
+    const c2x = targetX - dx * 0.24 + (vertical ? bend : 0);
+    const c2y = targetY - dy * 0.16 + (vertical ? 0 : side * bend);
     path = `M ${sourceX} ${sourceY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${targetX} ${targetY}`;
   } else if (kind === 'branch-open' || kind === 'branch-concluded' || kind === 'branch-habit') {
     const c1x = sourceX + Math.max(70, Math.abs(dx) * 0.56);
@@ -235,6 +240,7 @@ export const OrganicBranchEdge: React.FC<EdgeProps> = ({
 
   return (
     <g>
+      {edgeData?.description && <title>{edgeData.description}</title>}
       {cfg.glow && (
         <path
           d={path}

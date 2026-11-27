@@ -23,10 +23,22 @@ import type {
   TranscribeVoiceResult,
   VoicePresetsResponse,
   WorkspaceHistoryEntry,
+  WorkspaceTest,
+  WorkspaceTestCheckIn,
+  WorkspaceTestProtocol,
 } from './types';
 
 export const USE_MOCK = false;
 const API_BASE = ''; // Proxied via Vite /api -> http://localhost:8000 for same-origin HttpOnly cookies
+
+async function workspaceTestRequest<T>(branchId: string, path: string, fallback: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE}/api/branches/${encodeURIComponent(branchId)}/tests${path}`, {
+    credentials: 'include',
+    ...init,
+  });
+  if (!response.ok) throw new Error(await errorDetail(response, fallback));
+  return response.json();
+}
 
 const RED_FLAG_KEYWORDS = [
   'chest pain',
@@ -335,6 +347,39 @@ export const api = {
     return res.json();
   },
 
+  async getWorkspaceTests(branchId: string): Promise<WorkspaceTest[]> {
+    if (USE_MOCK) return [];
+    return workspaceTestRequest(branchId, '', 'Could not load tests.');
+  },
+
+  async getWorkspaceTestProtocol(branchId: string): Promise<WorkspaceTestProtocol> {
+    return workspaceTestRequest(branchId, '/protocol', 'Could not load the test protocol.');
+  },
+
+  async startWorkspaceTest(branchId: string, rank: number, expectedFactor: string): Promise<WorkspaceTest> {
+    return workspaceTestRequest(branchId, '', 'Could not start the proposed test.', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank, expected_factor: expectedFactor }),
+    });
+  },
+
+  async saveWorkspaceTestCheckIn(branchId: string, testId: string, checkIn: WorkspaceTestCheckIn): Promise<WorkspaceTest> {
+    return workspaceTestRequest(branchId, `/${encodeURIComponent(testId)}/check-ins`, 'Could not save this check-in.', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(checkIn),
+    });
+  },
+
+  async finishWorkspaceTest(branchId: string, testId: string): Promise<WorkspaceTest> {
+    return workspaceTestRequest(branchId, `/${encodeURIComponent(testId)}/finish`, 'Could not finish the test.', { method: 'POST' });
+  },
+
+  async cancelWorkspaceTest(branchId: string, testId: string): Promise<WorkspaceTest> {
+    return workspaceTestRequest(branchId, `/${encodeURIComponent(testId)}/cancel`, 'Could not cancel the test.', { method: 'POST' });
+  },
+
   async transitionBranch(id: string, action: BranchAction, resolution?: string): Promise<{
     graph: GraphResponse; detail: BranchDetailResponse; history: WorkspaceHistoryEntry[];
   }> {
@@ -433,7 +478,9 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ branch_id: branchId, question }),
     });
-    if (!res.ok) throw new Error(await errorDetail(res, `POST /api/ask failed (${res.status})`));
+    if (!res.ok) {
+      throw Object.assign(new Error(await errorDetail(res, `Ask failed (${res.status}).`)), { status: res.status });
+    }
     return res.json();
   },
 

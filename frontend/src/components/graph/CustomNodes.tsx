@@ -390,6 +390,8 @@ export const TimelineResolutionNode: React.FC<NodeProps> = ({ data }) => {
       title={title}
       className="group relative flex h-7 w-7 items-center justify-center rounded-full border border-branchOpen bg-s1 text-branchOpen"
     >
+      <Handle type="source" position={Position.Right} className="!opacity-0" />
+      <Handle type="target" position={Position.Left} className="!opacity-0" />
       <GitMerge className="h-4 w-4" />
       <span
         className="absolute bottom-9 left-1/2 w-[172px] -translate-x-1/2 rounded-xl border border-border bg-s1 px-3 py-2 text-left shadow-lg"

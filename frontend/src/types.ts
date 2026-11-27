@@ -101,6 +101,58 @@ export interface BranchDraftContext {
   related_resolutions: Array<{ id: string; title: string; date: string; note: string }>;
 }
 
+export interface WorkspaceTestCheckIn {
+  date: string;
+  exposed: boolean;
+  outcome: boolean;
+}
+
+export interface WorkspaceTestProtocol {
+  minimum_days: number;
+  minimum_days_per_group: number;
+  threshold_points: number;
+  proposals: Array<{
+    rank: number;
+    factor: string;
+    plan: string;
+    factor_question: string;
+    outcome_question: string;
+  }>;
+}
+
+export interface WorkspaceTest {
+  id: string;
+  branch_id: string;
+  rank: number;
+  factor: string;
+  outcome_label: string;
+  factor_question: string;
+  outcome_question: string;
+  plan: string;
+  start_date: string;
+  latest_date: string;
+  status: 'active' | 'completed' | 'cancelled';
+  check_ins: WorkspaceTestCheckIn[];
+  minimum_days: number;
+  minimum_days_per_group: number;
+  threshold_points: number;
+  counts: {
+    exposed_days: number;
+    unexposed_days: number;
+    exposed_outcomes: number;
+    unexposed_outcomes: number;
+  };
+  can_finish: boolean;
+  result: {
+    direction: 'supported' | 'weakened' | 'inconclusive';
+    difference_points: number;
+    exposed_rate: number;
+    unexposed_rate: number;
+    summary: string;
+  } | null;
+  finished_date: string | null;
+}
+
 export type BranchAction = 'resolve' | 'dissolve';
 
 export interface WorkspaceHistoryEntry {

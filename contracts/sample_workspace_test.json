@@ -1,0 +1,28 @@
+{
+  "id": "wtest_0123456789abcdef0123456789abcdef",
+  "branch_id": "br_custom_0123456789abcdef0123456789abcdef",
+  "rank": 1,
+  "factor": "Short sleep",
+  "factor_question": "Did you sleep less than 6 hours last night?",
+  "outcome_label": "Headaches",
+  "outcome_question": "Did you have a headache?",
+  "plan": "Keep your usual routine and log the two observations each day.",
+  "start_date": "2026-11-27",
+  "latest_date": "2026-11-27",
+  "status": "active",
+  "check_ins": [
+    {"date": "2026-11-27", "exposed": true, "outcome": false}
+  ],
+  "minimum_days": 7,
+  "minimum_days_per_group": 3,
+  "threshold_points": 10,
+  "counts": {
+    "exposed_days": 1,
+    "unexposed_days": 0,
+    "exposed_outcomes": 0,
+    "unexposed_outcomes": 0
+  },
+  "can_finish": false,
+  "result": null,
+  "finished_date": null
+}

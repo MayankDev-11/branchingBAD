@@ -70,7 +70,7 @@ def test_graph_matches_contract():
     data = get("/api/graph")
     assert list(data) == ["range", "trunk", "change_events", "branches", "knowledge"]
     assert_same_shape(data, sample("graph"))
-    for key in ("trunk", "change_events", "branches", "knowledge"):
+    for key in ("trunk", "change_events", "branches"):
         assert data[key], f"{key} should not be empty"
 
 

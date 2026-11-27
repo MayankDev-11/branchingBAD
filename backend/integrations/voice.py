@@ -166,7 +166,11 @@ def synthesize(body: SpeechRequest, user: User) -> Response:
         tts_model = (
             os.environ.get("ELEVENLABS_TTS_MODEL", "").strip() or DEFAULT_TTS_MODEL
         )
-        payload = {"model_id": tts_model, "text": spoken}
+        # Bracketed redaction markers can be interpreted as audio cues by expressive models.
+        narration = " ".join(re.sub(r"\[\s*REDACTED\s*\]", " ", spoken, flags=re.I).split())
+        if not any(char.isalnum() for char in narration):
+            raise HTTPException(422, "No narratable text remains after redaction.")
+        payload = {"model_id": tts_model, "text": narration}
         if lang and tts_model != "eleven_multilingual_v2":
             payload["language_code"] = lang
         audio = render_audio(voice, key, payload)

@@ -12,9 +12,10 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import { api, synthesizeWithElevenLabs } from '../../api';
+import { api, synthesizeWithElevenLabs, USE_MOCK } from '../../api';
 import { readAskAudit } from '../../askAudit';
 import { VoiceControl, useVoicePreferences } from '../VoiceControl';
+import { WorkspaceTests } from './WorkspaceTests';
 import type { AskResponse, BranchAction, BranchDetailResponse, BranchDraftContext, BranchHypothesis } from '../../types';
 
 interface InvestigationPanelProps {
@@ -29,6 +30,8 @@ interface InvestigationPanelProps {
   onBranchTransition: (id: string, action: BranchAction, resolution?: string) => Promise<void>;
   resolution: string | null;
   onGenerateDrafts: (id: string) => Promise<BranchDraftContext>;
+  draftNotice?: string | null;
+  focusedHypothesisRank?: number | null;
 }
 
 const ConfidenceRing: React.FC<{ value: number; rank: number }> = ({ value, rank }) => {
@@ -72,8 +75,17 @@ const HypothesisCard: React.FC<{
   testLabel?: string;
   workspace?: boolean;
   onOpenRecord: (id: string) => void;
-}> = ({ hyp, defaultExpanded, testLabel = 'Test', workspace = false, onOpenRecord }) => {
+  focused?: boolean;
+  onReviewTest?: () => void;
+}> = ({ hyp, defaultExpanded, testLabel = 'Test', workspace = false, onOpenRecord, focused = false, onReviewTest }) => {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const card = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focused) {
+      setExpanded(true);
+      card.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [focused]);
   const pct = hyp.confidence;
   const borderColor =
     hyp.rank === 1
@@ -93,14 +105,21 @@ const HypothesisCard: React.FC<{
 
   return (
     <div
+      ref={card}
       className="rounded-xl p-3.5 transition-colors"
       style={{ backgroundColor: 'var(--s2)', border: `1px solid ${borderColor}` }}
     >
       <div
         role="button"
         tabIndex={0}
+        aria-expanded={expanded}
         onClick={() => setExpanded((v) => !v)}
-        onKeyDown={(e) => e.key === 'Enter' && setExpanded((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setExpanded((value) => !value);
+          }
+        }}
         className="flex items-start justify-between gap-3 cursor-pointer"
       >
         <div className="flex items-start gap-2.5 min-w-0">
@@ -177,10 +196,21 @@ const HypothesisCard: React.FC<{
             </p>
           )}
           {hyp.test && <div
-            className="whitespace-pre-line rounded-lg px-2.5 py-1.5 font-mono text-[10.5px] text-t2"
+            className="space-y-2 rounded-lg px-2.5 py-2 text-[11.5px] text-t2"
             style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
           >
-            {testLabel}: {hyp.test}
+            <p className="font-semibold text-t1">{testLabel}</p>
+            <p className="whitespace-pre-line leading-relaxed">{hyp.test}</p>
+            {onReviewTest && (
+              <button
+                type="button"
+                onClick={onReviewTest}
+                aria-label={`Review proposed test for ${hyp.label ?? hyp.text ?? 'this hypothesis'}`}
+                className="rounded-md border border-border-strong bg-s2 px-2.5 py-1.5 text-xs font-semibold text-branchOpen"
+              >
+                Review proposed test
+              </button>
+            )}
           </div>}
         </div>
       )}
@@ -200,6 +230,8 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   onBranchTransition,
   resolution,
   onGenerateDrafts,
+  draftNotice,
+  focusedHypothesisRank,
 }) => {
   const [speakingSummary, setSpeakingSummary] = useState(false);
   const [loadingAudio, setLoadingAudio] = useState(false);
@@ -224,6 +256,8 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   const [draftContext, setDraftContext] = useState<BranchDraftContext | null>(null);
   const [draftRequestId, setDraftRequestId] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<{ id: string; message: string } | null>(null);
+  const [requestedTest, setRequestedTest] = useState<{ branchId: string; rank: number } | null>(null);
+  const testSection = useRef<HTMLDivElement>(null);
 
   const workspaceBranchId = branch?.id.startsWith('br_custom_') ? branch.id : null;
   const currentDraftBranch = useRef(workspaceBranchId);
@@ -241,6 +275,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
     return () => { current = false; };
   }, [workspaceBranchId, branch?.status]);
   useEffect(() => {
+    setRequestedTest(null);
     setAction(null);
     setResolutionNote('');
     setActionError('');
@@ -667,6 +702,9 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
             )}
           </section>
         )}
+        {workspace && draftNotice && (
+          <p role="status" className="rounded-lg border border-border bg-s2 p-3 text-xs leading-relaxed text-t2">{draftNotice}</p>
+        )}
         {draftError?.id === branch.id && <p role="alert" className="text-[12px] text-change">{draftError.message}</p>}
         {workspace && !!draftContext?.related_resolutions.length && (
           <section className="space-y-2 rounded-xl border border-border p-3.5">
@@ -680,7 +718,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           </section>
         )}
         {workspace && !guidance && !branch.hypotheses.length && !draftContext?.can_generate && (
-          <p className="text-[12px] text-t2">This branch has no suggested factors. Try a tracked demo outcome, such as headache days or short sleep.</p>
+          <p className="text-[12px] text-t2">There is no supported comparison for this question. Try naming an outcome and a factor, for example, “Does late caffeine affect my sleep?”</p>
         )}
 
         {/* Triggering Change Event Banner */}
@@ -702,7 +740,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           </div>
         )}
 
-        {!guidance && <div className="space-y-2.5">
+        {!guidance && branch.hypotheses.length > 0 && <div className="space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-mono text-[9.5px] uppercase tracking-wider text-t3">
               {branch.hypotheses.length} Competing Hypotheses
@@ -745,15 +783,33 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
 
           {branch.hypotheses.map((hyp) => (
             <HypothesisCard
-              key={hyp.rank}
+              key={`${branch.id}-${hyp.rank}`}
               hyp={hyp}
               defaultExpanded={hyp.rank === 1}
               workspace={workspace}
-              testLabel={workspace ? 'Next step' : 'Test'}
+              testLabel={workspace ? 'Proposed test' : 'Test'}
               onOpenRecord={(rid) => onOpenRecord(rid, 'raw')}
+              focused={focusedHypothesisRank === hyp.rank}
+              onReviewTest={workspace && !USE_MOCK && branch.branch_type !== 'habit' && branch.status === 'open'
+                ? () => {
+                    setRequestedTest({ branchId: branch.id, rank: hyp.rank });
+                    testSection.current?.scrollIntoView({ block: 'nearest' });
+                  }
+                : undefined}
             />
           ))}
         </div>}
+
+        {workspace && !USE_MOCK && !guidance && branch.branch_type !== 'habit' && (
+          <div ref={testSection}>
+            <WorkspaceTests
+              key={branch.id}
+              branch={branch}
+              requestedRank={requestedTest?.branchId === branch.id ? requestedTest.rank : null}
+              onClearProposal={() => setRequestedTest(null)}
+            />
+          </div>
+        )}
 
         {/* Experiment Card */}
         {exp && (

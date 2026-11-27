@@ -1,16 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
   BackgroundVariant,
-  useReactFlow,
+  type ReactFlowInstance,
   type Node,
   type Edge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Clock, FileSearch, GitBranch, Grid3X3, Mic, Plus, RotateCcw, Sparkles, Waves } from 'lucide-react';
-import type { BranchDetailResponse, BranchHypothesis, GraphResponse, InsightsResponse } from '../../types';
+import type { BranchAction, BranchDetailResponse, BranchHypothesis, GraphResponse, InsightsResponse } from '../../types';
 import { alternatingY, dateToX, TRUNK_Y } from './graphMath';
 import {
   AnchorNode,
@@ -26,6 +26,7 @@ import {
 import { OrganicBranchEdge, TrunkEdge } from './CustomEdges';
 import { ElevenLabsBriefingDock, type BriefingBeat } from '../ElevenLabsBriefingDock';
 import { SmoothZoomControls } from './SmoothZoomControls';
+import { sharedEvidenceEdges } from './sharedEvidence';
 
 const nodeTypes = {
   anchor: AnchorNode,
@@ -61,10 +62,10 @@ const firstClaimIds = (hyp: BranchHypothesis | undefined, count: number) =>
   (hyp?.claims[0]?.record_ids ?? []).slice(0, count);
 const METRIC_WORD: Record<string, string> = { sl: 'Sleep', hd: 'Headache', wt: 'Water', sc: 'Screen', cf: 'Caffeine' };
 
-// Default zoom: fit the whole graph, but never so far out that labels can't be read on a
-// projector. The trunk's far ends may sit just off screen; pan or zoom out to see them.
-const MIN_READABLE_ZOOM = 0.66;
-const MIN_READABLE_ZOOM_WITH_PANEL = 0.55;
+const MIN_GRAPH_ZOOM = 0.16;
+const MIN_OVERVIEW_ZOOM = 0.52;
+const MAX_OVERVIEW_ZOOM = 0.74;
+const workspaceBranchX = (index: number) => 1240 + Math.floor(index / 2) * 450 + (index % 2) * 280;
 
 // The guided audio brief: four short lines built only from API numbers (rule 9).
 const buildBriefing = (
@@ -131,56 +132,62 @@ const spokenMinutes = (min: number) => `${Math.floor(min / 60)} hours ${Math.rou
 const longDate = (iso: string) =>
   new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
 
+export interface BranchClosure {
+  id: string;
+  action: BranchAction;
+  nextGraph: GraphResponse;
+  progress: number;
+}
+
+function timelineNotes(graph: GraphResponse) {
+  let lastX = 0;
+  return graph.knowledge.filter(({ id }) => id.startsWith('kn_br_custom_')).map((item) => {
+    const x = Math.max(dateToX(graph.range.start, item.date), lastX + 185);
+    lastX = x;
+    return { ...item, x };
+  });
+}
+
 interface GraphCanvasProps {
   graph: GraphResponse;
   insights: InsightsResponse | null;
   branchDetailsMap: Record<string, BranchDetailResponse>;
   selectedBranchId: string | null;
-  isRightPanelOpen: boolean;
-  demoDaysAdvanced: number;
+  replaying: boolean;
+  branchClosure: BranchClosure | null;
   onSelectBranch: (id: string) => void;
+  onSelectFactor: (id: string, rank: number) => void;
   onOpenRecord: (id: string, tab?: 'raw' | 'ai') => void;
   onAdvanceDemo: (days: number) => void;
   onOpenNewBranch: (mode: 'manual' | 'voice') => void;
 }
 
-const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
+export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   graph,
   insights,
   branchDetailsMap,
   selectedBranchId,
-  isRightPanelOpen,
-  demoDaysAdvanced,
+  replaying,
+  branchClosure,
   onSelectBranch,
+  onSelectFactor,
   onOpenRecord,
   onAdvanceDemo,
   onOpenNewBranch,
 }) => {
-  const { fitView, getNodes } = useReactFlow();
   const [showEvidenceNodes, setShowEvidenceNodes] = useState(true);
-  const [showSharedMycelium, setShowSharedMycelium] = useState(true);
+  const [showSharedMycelium, setShowSharedMycelium] = useState(false);
   const [animateSap, setAnimateSap] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
   const flowContainerRef = useRef<HTMLDivElement | null>(null);
   const [spotlightIds, setSpotlightIds] = useState<string[]>([]);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      // Frame the branches and their nodes, not the trunk's far ends, so a new knowledge node
-      // at the right edge is never cut off.
-      // (Branch start points stay in, since they sit left of each branch title.)
-      const content = getNodes()
-        .filter((node) => node.id !== 'trunk-start' && node.id !== 'trunk-end')
-        .map((node) => ({ id: node.id }));
-      fitView({
-        nodes: content.length ? content : undefined,
-        padding: 0.06,
-        minZoom: isRightPanelOpen ? MIN_READABLE_ZOOM_WITH_PANEL : MIN_READABLE_ZOOM,
-        duration: 380,
-      });
-    }, 90);
-    return () => clearTimeout(timer);
-  }, [isRightPanelOpen, graph, showEvidenceNodes, fitView]);
+  const extraBranches = useMemo(() => graph.branches
+    .filter(({ id, status }) => id.startsWith('br_custom_') && status === 'open')
+    .sort((a, b) => a.lane - b.lane), [graph.branches]);
+  // Keep the branch animation in the old canvas. Reinitialize React Flow after the saved
+  // branch list changes so old measurements and viewport transitions cannot carry over.
+  const layoutKey = extraBranches.map(({ id }) => id).join('|');
 
   const { nodes, edges } = useMemo(() => {
     const n: Node[] = [];
@@ -190,12 +197,15 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
 
     // 1. Living Organic Main Root Trunk
     const trunkStartX = 40;
-    const extraBranches = graph.branches.filter((branch) => branch.id.startsWith('br_custom_') && branch.status === 'open');
-    const resolutions = graph.knowledge.filter((item) => item.id.startsWith('kn_br_custom_'));
+    const resolutions = timelineNotes(graph);
+    const noteTarget = branchClosure?.action === 'resolve'
+      ? timelineNotes(branchClosure.nextGraph).find(({ id }) => id === `kn_${branchClosure.id}`)?.x
+      : undefined;
     const trunkEndX = Math.max(
       1960,
-      1530 + extraBranches.length * 240 + (extraBranches.length > 0 ? 420 : 0),
-      1350 + resolutions.length * 185
+      ...extraBranches.map((_, index) => workspaceBranchX(index) + 470),
+      1350 + resolutions.length * 185,
+      (resolutions[resolutions.length - 1]?.x ?? 0) + 120
     );
     n.push(
       { id: 'trunk-start', type: 'anchor', position: { x: trunkStartX, y: TRUNK_Y }, data: {} },
@@ -569,20 +579,18 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
           source: 'br0-sub-1',
           target: 'br1-sub-1',
           type: 'organicBranch',
-          data: { kind: 'cross-mycelium' },
+          ariaLabel: 'Earlier late caffeine result also involved shorter sleep',
+          data: { kind: 'cross-mycelium', description: 'Earlier late caffeine result also involved shorter sleep' },
         });
       }
     }
 
     // 5. USER-CREATED BRANCHES — ALTERNATE CLEANLY UP (-1) -> DOWN (+1)
-    let lastResolutionX = 0;
     for (const item of resolutions) {
       const branchId = item.id.slice(3);
-      const x = Math.max(dateToX(rangeStart, item.date), lastResolutionX + 185);
-      lastResolutionX = x;
       const branch = graph.branches.find(({ id }) => id === branchId);
       n.push({
-        id: item.id, type: 'timelineResolution', position: { x: x - 14, y: TRUNK_Y - 14 },
+        id: item.id, type: 'timelineResolution', position: { x: item.x - 14, y: TRUNK_Y - 14 },
         data: { title: branch?.title ?? item.statement, dateLabel: shortDate(item.date),
                 onClick: () => onSelectBranch(branchId) },
       });
@@ -595,9 +603,12 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
         ? 'Workspace'
         : `${factorCount} ${factorCount === 1 ? 'factor' : 'factors'}`;
       const side: -1 | 1 = idx % 2 === 0 ? -1 : 1;
-      const startX = 1460 + idx * 240;
-      const hubX = startX + 160;
-      const hubY = alternatingY(side, 1);
+      const startX = workspaceBranchX(idx);
+      const closing = branchClosure?.id === cb.id ? branchClosure.progress : 0;
+      const targetX = noteTarget ?? startX;
+      const hubX = startX + 160 + (targetX - startX - 160) * closing;
+      const y = alternatingY(side, 1);
+      const hubY = y + (TRUNK_Y - y) * closing;
 
       const startId = `cb-start-${cb.id}`;
       const hubId = `cb-hub-${cb.id}`;
@@ -608,6 +619,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
           id: hubId,
           type: 'branchHub',
           position: { x: hubX, y: hubY },
+          style: closing ? { opacity: 1 - closing } : undefined,
           data: {
             id: cb.id,
             title: cb.title,
@@ -626,7 +638,8 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
         source: startId,
         target: hubId,
         type: 'organicBranch',
-        data: { kind: cb.branch_type === 'habit' ? 'branch-habit' : 'branch-open', animateFlow: animateSap },
+        style: closing ? { opacity: 1 - closing } : undefined,
+        data: { kind: cb.branch_type === 'habit' ? 'branch-habit' : 'branch-open', animateFlow: animateSap && !closing },
       });
 
       const subList = detail?.hypotheses ?? [];
@@ -636,7 +649,8 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
         n.push({
           id: subId,
           type: 'subHypothesis',
-          position: { x: hubX + 260, y: hubY + spread },
+          position: { x: hubX + 260 * (1 - closing), y: hubY + spread * (1 - closing) },
+          style: closing ? { opacity: 1 - closing } : undefined,
           data: {
             rank: hyp.rank,
             label: hyp.label ?? hyp.text ?? 'Sub-branch',
@@ -644,7 +658,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
             detail: hyp.claims[0]?.text ?? hyp.test,
             tone: sIdx === 0 ? 'emerald' : 'cyan',
             compact: true,
-            onClick: () => onSelectBranch(cb.id),
+            onClick: () => onSelectFactor(cb.id, hyp.rank),
           },
         });
         e.push({
@@ -652,14 +666,18 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
           source: hubId,
           target: subId,
           type: 'organicBranch',
-          data: { kind: sIdx === 0 ? 'sub-emerald' : 'sub-cyan', animateFlow: animateSap },
+          style: closing ? { opacity: 1 - closing } : undefined,
+          data: { kind: sIdx === 0 ? 'sub-emerald' : 'sub-cyan', animateFlow: animateSap && !closing },
         });
       });
     });
 
+    if (showSharedMycelium) e.push(...sharedEvidenceEdges(n, branchDetailsMap));
     return { nodes: n, edges: e };
   }, [
     graph,
+    extraBranches,
+    branchClosure,
     branchDetailsMap,
     selectedBranchId,
     showEvidenceNodes,
@@ -667,8 +685,29 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
     animateSap,
     spotlightIds,
     onSelectBranch,
+    onSelectFactor,
     onOpenRecord,
   ]);
+
+  const frameActiveGraph = (flow: ReactFlowInstance) => {
+    const canvas = flowContainerRef.current;
+    if (!canvas) return;
+    const { width, height } = canvas.getBoundingClientRect();
+    if (!width || !height) return;
+
+    const left = 50;
+    const right = nodes.find(({ id }) => id === 'trunk-end')?.position.x ?? 1960;
+    const zoom = Math.max(MIN_OVERVIEW_ZOOM, Math.min(MAX_OVERVIEW_ZOOM, (width - 56) / (right - left)));
+    const visibleHalf = width / (2 * zoom);
+    const selected = nodes.find(({ id }) => id === `cb-hub-${selectedBranchId}` || id === `kn_${selectedBranchId}`);
+    const centerX = right - left <= visibleHalf * 2
+      ? (left + right) / 2
+      : Math.min(right - visibleHalf, Math.max(left + visibleHalf, selected?.position.x ?? left));
+    void flow.setViewport({ x: width / 2 - centerX * zoom, y: height / 2 - TRUNK_Y * zoom, zoom });
+  };
+
+  const experiment = branchDetailsMap.br_1?.experiment;
+  const remainingDays = experiment?.locked ? Math.max(0, experiment.duration_days - experiment.days_elapsed) : 0;
 
   const briefing = useMemo(
     () => buildBriefing(graph, branchDetailsMap, insights),
@@ -696,7 +735,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
               active: showSharedMycelium,
               onClick: () => setShowSharedMycelium((v) => !v),
               icon: <GitBranch className="w-3.5 h-3.5" />,
-              label: 'Shared Link',
+              label: 'Evidence Links',
             },
             {
               active: animateSap,
@@ -753,34 +792,35 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
         </div>
       </div>
 
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        nodeOrigin={[0.5, 0.5]}
-        fitView
-        fitViewOptions={{ padding: 0.05, minZoom: MIN_READABLE_ZOOM }}
-        minZoom={0.28}
-        maxZoom={1.85}
-        zoomOnScroll={false}
-        zoomOnPinch={true}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={true}
-        proOptions={{ hideAttribution: true }}
-      >
-        {showGrid && (
-          <Background
-            variant={BackgroundVariant.Dots}
-            gap={26}
-            size={1.35}
-            color="var(--grid-dot)"
-          />
-        )}
-      </ReactFlow>
-
-      <SmoothZoomControls containerRef={flowContainerRef} />
+      <ReactFlowProvider key={layoutKey}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          nodeOrigin={[0.5, 0.5]}
+          onInit={frameActiveGraph}
+          defaultViewport={{ x: 12, y: 56, zoom: MIN_OVERVIEW_ZOOM }}
+          minZoom={MIN_GRAPH_ZOOM}
+          maxZoom={1.85}
+          zoomOnScroll={false}
+          zoomOnPinch={true}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={true}
+          proOptions={{ hideAttribution: true }}
+        >
+          {showGrid && (
+            <Background
+              variant={BackgroundVariant.Dots}
+              gap={26}
+              size={1.35}
+              color="var(--grid-dot)"
+            />
+          )}
+        </ReactFlow>
+        <SmoothZoomControls containerRef={flowContainerRef} />
+      </ReactFlowProvider>
 
       {/* Bottom Interactive Dock */}
       <div className="pointer-events-none absolute bottom-4 left-5 right-44 flex flex-wrap items-end justify-between gap-3">
@@ -802,7 +842,7 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
           </span>
           <span className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--hyp)' }} />
-            Shared link
+            Shared evidence
           </span>
         </div>
 
@@ -818,25 +858,28 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
         >
           <Clock className="w-3.5 h-3.5 text-branchOpen" />
           <span className="font-mono text-t2">
-            {demoDaysAdvanced >= 10 ? 'Concluded (+10d)' : 'Demo Clock'}
+            Experiment replay · {shortDate(graph.range.end)}
           </span>
-          {demoDaysAdvanced < 10 ? (
+          {remainingDays > 0 ? (
             <button
               type="button"
-              onClick={() => onAdvanceDemo(10)}
+              onClick={() => onAdvanceDemo(remainingDays)}
+              disabled={replaying || !!branchClosure}
+              title="Fast-forward the synthetic timeline to evaluate the locked experiment"
               className="px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-opacity hover:opacity-90"
               style={{ backgroundColor: 'var(--trunk)', color: 'var(--btn-ink)' }}
             >
-              +10 Days → Conclude
+              {replaying ? 'Replaying…' : 'Run to experiment result'}
             </button>
           ) : (
             <button
               type="button"
               onClick={() => onAdvanceDemo(0)}
+              disabled={replaying || !!branchClosure}
               className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium text-[11px] text-t2 hover:text-t1"
               style={{ backgroundColor: 'var(--s2)', border: '1px solid var(--border)' }}
             >
-              <RotateCcw className="w-3 h-3" /> Reset
+              <RotateCcw className="w-3 h-3" /> {replaying ? 'Resetting…' : 'Reset replay'}
             </button>
           )}
         </div>
@@ -844,9 +887,3 @@ const GraphCanvasInner: React.FC<GraphCanvasProps> = ({
     </div>
   );
 };
-
-export const GraphCanvas: React.FC<GraphCanvasProps> = (props) => (
-  <ReactFlowProvider>
-    <GraphCanvasInner {...props} />
-  </ReactFlowProvider>
-);
